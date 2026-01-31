@@ -2,7 +2,9 @@
 
 from typing import List, Tuple, Optional
 
+import torchaudio
 from pyannote.audio import Pipeline
+from pyannote.core import Annotation
 
 
 def diarize_audio(
@@ -21,11 +23,28 @@ def diarize_audio(
     Returns:
         List of (start_time, end_time, speaker_label) tuples, sorted by start time
     """
-    if num_speakers is not None:
-        diarization = pipeline(file_path, num_speakers=num_speakers)
-    else:
-        diarization = pipeline(file_path)
 
+    # 🔹 1. pyannote 안정성을 위한 torchaudio 로딩
+    waveform, sample_rate = torchaudio.load(file_path)
+    audio_dict = {"waveform": waveform, "sample_rate": sample_rate}
+
+    # 🔹 2. diarization 실행
+    if num_speakers is not None:
+        diarization_out = pipeline(audio_dict, num_speakers=num_speakers)
+    else:
+        diarization_out = pipeline(audio_dict)
+
+    # 🔹 3. pyannote 3.x 출력 타입 대응
+    if isinstance(diarization_out, Annotation):
+        diarization = diarization_out
+    elif hasattr(diarization_out, "speaker_diarization"):
+        diarization = diarization_out.speaker_diarization
+    elif hasattr(diarization_out, "exclusive_speaker_diarization"):
+        diarization = diarization_out.exclusive_speaker_diarization
+    else:
+        diarization = diarization_out
+
+    # 🔹 4. 세그먼트 추출
     segments: List[Tuple[float, float, str]] = []
     for turn, _, speaker in diarization.itertracks(yield_label=True):
         segments.append((float(turn.start), float(turn.end), str(speaker)))
