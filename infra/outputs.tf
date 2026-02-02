@@ -28,9 +28,15 @@ output "api_url" {
   value       = "http://${aws_eip.main.public_ip}:8000"
 }
 
+output "s3_logs_bucket" {
+  description = "S3 bucket for job logs"
+  value       = aws_s3_bucket.logs.bucket
+}
+
 output "github_secrets" {
   description = "Values to set as GitHub Secrets"
   value = {
-    ECR_REGISTRY = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+    ECR_REGISTRY   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+    S3_LOGS_BUCKET = aws_s3_bucket.logs.bucket
   }
 }

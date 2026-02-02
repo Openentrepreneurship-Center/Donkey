@@ -17,6 +17,7 @@ from app.services.summarization import (
 )
 from app.services.pii_filter import filter_pii
 from app.services.validation import validate_medical_conversation
+from app.services.job_logger import JobLogger
 
 
 async def process_audio_job(job_id: str, file_url: str) -> None:
@@ -32,9 +33,12 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
     6. Filter PII
     7. Generate SOAP summary, title, simpleSummary
     8. Update Redis with results
+    9. Save job log to S3
     """
     store = await get_job_store()
     settings = get_settings()
+    logger = JobLogger(job_id=job_id, file_url=file_url)
+    current_stage = ""
 
     try:
         await store.update_job(job_id, {"status": "processing"})
@@ -43,26 +47,40 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             tmpdir_path = Path(tmpdir)
 
             # 1. Download audio
-            # Determine extension from URL
-            url_path = file_url.split("?")[0]  # Remove query params
+            current_stage = "download"
+            logger.start_stage()
+            url_path = file_url.split("?")[0]
             ext = Path(url_path).suffix or ".wav"
             audio_path = tmpdir_path / f"input{ext}"
-
             await download_audio(file_url, audio_path)
+            logger.end_stage("download_time_ms")
 
             # 2. Convert to WAV
+            current_stage = "conversion"
+            logger.start_stage()
             wav_path = ensure_wav_16k_mono(audio_path)
+            logger.end_stage("conversion_time_ms")
 
             # Get duration
             duration = get_audio_duration(wav_path)
+            logger.set_audio_duration(duration)
 
             # 3. Diarization
+            current_stage = "diarization"
+            logger.start_stage()
             segments = diarize_audio(
                 wav_path,
                 num_speakers=settings.default_num_speakers,
             )
+            logger.end_stage("diarization_time_ms")
 
             if not segments:
+                logger.set_quality(
+                    is_abusing=True,
+                    abusing_reason="음성이 감지되지 않았습니다",
+                    speaker_count=0,
+                    segment_count=0,
+                )
                 await store.update_job(job_id, {
                     "status": "completed",
                     "isGenerated": True,
@@ -73,9 +91,17 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "simpleSummary": "",
                     "consultationSummary": None,
                 })
+                logger.complete("completed")
+                await logger.save_to_s3()
                 return
 
+            # Count unique speakers
+            unique_speakers = set(seg[2] for seg in segments)
+            logger.set_quality(speaker_count=len(unique_speakers))
+
             # 4. Transcribe
+            current_stage = "transcription"
+            logger.start_stage()
             audio = AudioSegment.from_file(str(wav_path))
             diarized_lines: list[str] = []
 
@@ -99,7 +125,14 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     line = f"[{speaker}] {seconds_to_time_str(start)}–{seconds_to_time_str(end)}: {text}"
                     diarized_lines.append(line)
 
+            logger.end_stage("transcription_time_ms")
+            logger.set_quality(segment_count=len(diarized_lines))
+
             if not diarized_lines:
+                logger.set_quality(
+                    is_abusing=True,
+                    abusing_reason="전사할 수 있는 음성이 없습니다",
+                )
                 await store.update_job(job_id, {
                     "status": "completed",
                     "isGenerated": True,
@@ -110,17 +143,26 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "simpleSummary": "",
                     "consultationSummary": None,
                 })
+                logger.complete("completed")
+                await logger.save_to_s3()
                 return
 
             diarized_text = "\n".join(diarized_lines)
 
             # 5. Validate as medical conversation
+            current_stage = "validation"
+            logger.start_stage()
             is_valid, abuse_reason = validate_medical_conversation(
                 diarized_text,
                 chat_model=settings.chat_model,
             )
+            logger.end_stage("validation_time_ms")
 
             if not is_valid:
+                logger.set_quality(
+                    is_abusing=True,
+                    abusing_reason=abuse_reason or "진료 대화가 아님",
+                )
                 await store.update_job(job_id, {
                     "status": "completed",
                     "isGenerated": True,
@@ -131,21 +173,37 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "simpleSummary": "",
                     "consultationSummary": None,
                 })
+                logger.complete("completed")
+                await logger.save_to_s3()
                 return
 
             # 6. Filter PII
+            current_stage = "pii_filter"
+            logger.start_stage()
             filtered_text = filter_pii(diarized_text)
             filtered_lines = [filter_pii(line) for line in diarized_lines]
+            logger.end_stage("pii_filter_time_ms")
 
             # 7. Generate summaries
+            current_stage = "summarization"
+            logger.start_stage()
             soap_text = generate_soap_summary(filtered_text, settings.chat_model)
             title = generate_title(filtered_text, settings.chat_model)
             simple_summary = generate_simple_summary(filtered_text, settings.chat_model)
+            logger.end_stage("summarization_time_ms")
 
             # Parse SOAP into structured format
             consultation_summary = parse_soap_to_consultation_summary(
                 soap_text,
                 filtered_lines,
+            )
+
+            # Set final quality metrics
+            logger.set_quality(
+                is_abusing=False,
+                abusing_reason="",
+                speaker_count=len(unique_speakers),
+                segment_count=len(diarized_lines),
             )
 
             # 8. Update job with results
@@ -160,9 +218,18 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 "consultationSummary": consultation_summary.model_dump(),
             })
 
+            logger.complete("completed")
+
     except Exception as e:
         error_msg = f"처리 중 오류 발생: {str(e)}"
         traceback.print_exc()
+
+        logger.set_error(
+            error_type=type(e).__name__,
+            error_message=str(e),
+            error_stage=current_stage,
+        )
+        logger.complete("error")
 
         await store.update_job(job_id, {
             "status": "error",
@@ -171,3 +238,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             "isAbusing": False,
             "abusingReason": "",
         })
+
+    finally:
+        # 9. Save log to S3
+        await logger.save_to_s3()

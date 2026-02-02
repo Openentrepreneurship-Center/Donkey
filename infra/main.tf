@@ -224,3 +224,65 @@ resource "aws_eip" "main" {
     Project = var.project_name
   }
 }
+
+# S3 Bucket for logs
+resource "aws_s3_bucket" "logs" {
+  bucket = "${var.project_name}-logs-${data.aws_caller_identity.current.account_id}"
+
+  tags = {
+    Name    = "${var.project_name}-logs"
+    Project = var.project_name
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  rule {
+    id     = "expire-old-logs"
+    status = "Enabled"
+
+    expiration {
+      days = 90
+    }
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# IAM Policy for S3 access
+resource "aws_iam_role_policy" "s3_policy" {
+  name = "${var.project_name}-s3-policy"
+  role = aws_iam_role.ec2_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.logs.arn,
+          "${aws_s3_bucket.logs.arn}/*"
+        ]
+      }
+    ]
+  })
+}

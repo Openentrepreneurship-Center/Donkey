@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # S3 Logging
+    s3_logs_bucket: str = ""
+    s3_logs_prefix: str = "job-logs"
+    aws_region: str = "ap-northeast-2"
+
     # Models
     stt_model: str = "gpt-4o-mini-transcribe"
     chat_model: str = "gpt-4o-mini"
