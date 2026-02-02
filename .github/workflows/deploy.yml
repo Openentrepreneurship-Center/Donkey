@@ -79,7 +79,7 @@ jobs:
               "echo " + ($envfile | @sh) + " > /home/ec2-user/.env",
               "if ! docker ps | grep -q donkey-redis; then docker stop donkey-redis 2>/dev/null || true; docker rm donkey-redis 2>/dev/null || true; docker run -d --name donkey-redis --restart unless-stopped redis:7-alpine; fi",
               "docker run -d --name donkey-api -p 8000:8000 --restart unless-stopped --link donkey-redis:redis --env-file /home/ec2-user/.env " + $ecr + "/donkey:latest",
-              "docker image prune -f",
+              "docker image prune -af",
               "sleep 5",
               "docker ps | grep -q donkey-api && echo Deployment successful! || (docker logs donkey-api 2>/dev/null; exit 1)"
             ]')
