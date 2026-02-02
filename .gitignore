@@ -8,6 +8,8 @@
 .env.local
 .env.*.local
 *.pem
+.venv/
+
 
 # Python
 __pycache__/
