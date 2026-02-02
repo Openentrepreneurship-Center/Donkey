@@ -63,16 +63,12 @@ jobs:
         env:
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
           INSTANCE_ID: ${{ steps.get-instance.outputs.instance_id }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          S3_LOGS_BUCKET: ${{ secrets.S3_LOGS_BUCKET }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
         run: |
           # Build commands JSON array using jq for proper escaping
           COMMANDS=$(jq -n \
             --arg ecr "$ECR_REGISTRY" \
-            --arg openai "$OPENAI_API_KEY" \
-            --arg hf "$HF_TOKEN" \
-            --arg s3bucket "$S3_LOGS_BUCKET" \
+            --arg envfile "$ENV_FILE" \
             '[
               "set -e",
               "echo Starting deployment...",
@@ -80,8 +76,9 @@ jobs:
               "docker pull " + $ecr + "/donkey:latest",
               "docker stop donkey-api 2>/dev/null || true",
               "docker rm donkey-api 2>/dev/null || true",
+              "echo " + ($envfile | @sh) + " > /home/ec2-user/.env",
               "if ! docker ps | grep -q donkey-redis; then docker stop donkey-redis 2>/dev/null || true; docker rm donkey-redis 2>/dev/null || true; docker run -d --name donkey-redis --restart unless-stopped redis:7-alpine; fi",
-              "docker run -d --name donkey-api -p 8000:8000 --restart unless-stopped --link donkey-redis:redis -e REDIS_URL=redis://redis:6379/0 -e OPENAI_API_KEY=" + $openai + " -e HF_TOKEN=" + $hf + " -e S3_LOGS_BUCKET=" + $s3bucket + " " + $ecr + "/donkey:latest",
+              "docker run -d --name donkey-api -p 8000:8000 --restart unless-stopped --link donkey-redis:redis --env-file /home/ec2-user/.env " + $ecr + "/donkey:latest",
               "docker image prune -f",
               "sleep 5",
               "docker ps | grep -q donkey-api && echo Deployment successful! || (docker logs donkey-api 2>/dev/null; exit 1)"
