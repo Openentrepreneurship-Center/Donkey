@@ -75,8 +75,11 @@ class JobLogger:
         if self._stage_start is None:
             return 0
         elapsed_ms = int((time.time() - self._stage_start) * 1000)
+        elapsed_sec = elapsed_ms / 1000
         setattr(self.log.stages, stage_name, elapsed_ms)
         self._stage_start = None
+        stage_label = stage_name.replace("_time_ms", "") if stage_name.endswith("_time_ms") else stage_name
+        print(f"[{self.log.job_id}] {stage_label}: {elapsed_sec:.2f}초", flush=True)
         return elapsed_ms
 
     def set_audio_duration(self, duration: float) -> None:

@@ -8,7 +8,12 @@ from app.config import get_settings
 from app.store.redis import get_job_store
 from app.services.audio import download_audio, ensure_wav_16k_mono, get_audio_duration
 from app.services.diarization import diarize_audio
-from app.services.transcription import transcribe_segment, seconds_to_time_str
+from app.services.rule_based_diarization import diarize_from_whisper_segments
+from app.services.transcription import (
+    transcribe_segment,
+    transcribe_with_segments,
+    seconds_to_time_str,
+)
 from app.services.summarization import (
     generate_soap_summary,
     generate_title,
@@ -65,68 +70,133 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             duration = get_audio_duration(wav_path)
             logger.set_audio_duration(duration)
 
-            # 3. Diarization
-            current_stage = "diarization"
-            logger.start_stage()
-            segments = diarize_audio(
-                wav_path,
-                num_speakers=settings.default_num_speakers,
-            )
-            logger.end_stage("diarization_time_ms")
+            diarized_lines: list[str]
+            unique_speakers: set[str]
 
-            if not segments:
-                logger.set_quality(
-                    is_abusing=True,
-                    abusing_reason="음성이 감지되지 않았습니다",
-                    speaker_count=0,
-                    segment_count=0,
-                )
-                await store.update_job(job_id, {
-                    "status": "completed",
-                    "isGenerated": True,
-                    "isAbusing": True,
-                    "abusingReason": "음성이 감지되지 않았습니다",
-                    "duration": duration,
-                    "title": "",
-                    "simpleSummary": "",
-                    "consultationSummary": None,
-                })
-                logger.complete("completed")
-                await logger.save_to_s3()
-                return
-
-            # Count unique speakers
-            unique_speakers = set(seg[2] for seg in segments)
-            logger.set_quality(speaker_count=len(unique_speakers))
-
-            # 4. Transcribe
-            current_stage = "transcription"
-            logger.start_stage()
-            audio = AudioSegment.from_file(str(wav_path))
-            diarized_lines: list[str] = []
-
-            for start, end, speaker in segments:
-                seg_duration = end - start
-                if seg_duration < settings.min_segment_duration:
-                    continue
-
-                seg_audio = audio[int(start * 1000):int(end * 1000)]
-
+            if settings.use_rule_based_diarization:
+                # 3. Whisper 1회 전사(구간 타임스탬프 포함)
+                current_stage = "transcription"
+                logger.start_stage()
                 try:
-                    text = transcribe_segment(
-                        seg_audio,
+                    whisper_segments = transcribe_with_segments(
+                        wav_path,
                         language=settings.default_language,
-                        model=settings.stt_model,
+                        model=settings.whisper_segment_model,
                     )
                 except Exception:
-                    text = ""
+                    whisper_segments = []
+                logger.end_stage("transcription_time_ms")
 
-                if text:
-                    line = f"[{speaker}] {seconds_to_time_str(start)}–{seconds_to_time_str(end)}: {text}"
-                    diarized_lines.append(line)
+                if not whisper_segments:
+                    logger.set_quality(
+                        is_abusing=True,
+                        abusing_reason="음성이 감지되지 않았습니다",
+                        speaker_count=0,
+                        segment_count=0,
+                    )
+                    await store.update_job(job_id, {
+                        "status": "completed",
+                        "isGenerated": True,
+                        "isAbusing": True,
+                        "abusingReason": "음성이 감지되지 않았습니다",
+                        "duration": duration,
+                        "title": "",
+                        "simpleSummary": "",
+                        "consultationSummary": None,
+                    })
+                    logger.complete("completed")
+                    await logger.save_to_s3()
+                    return
 
-            logger.end_stage("transcription_time_ms")
-            logger.set_quality(segment_count=len(diarized_lines))
+                # 4. 규칙 기반 화자 분리 (음향 특징 + K-means + 발화 길이 규칙)
+                current_stage = "diarization"
+                logger.start_stage()
+                diarized_segments = diarize_from_whisper_segments(
+                    wav_path,
+                    whisper_segments,
+                    min_segment_duration=settings.min_segment_duration,
+                )
+                logger.end_stage("diarization_time_ms")
+
+                unique_speakers = set(seg[2] for seg in diarized_segments)
+                logger.set_quality(speaker_count=len(unique_speakers))
+
+                # Whisper 구간과 화자 라벨 매칭 (같은 순서)
+                valid_segments = [
+                    s
+                    for s in whisper_segments
+                    if (s["end"] - s["start"]) >= settings.min_segment_duration
+                    and (s.get("text") or "").strip()
+                ]
+                diarized_lines = []
+                for seg, (start, end, speaker) in zip(valid_segments, diarized_segments):
+                    text = (seg.get("text") or "").strip()
+                    if text:
+                        line = f"[{speaker}] {seconds_to_time_str(start)}–{seconds_to_time_str(end)}: {text}"
+                        diarized_lines.append(line)
+                logger.set_quality(segment_count=len(diarized_lines))
+            else:
+                # 3. Diarization (pyannote)
+                current_stage = "diarization"
+                logger.start_stage()
+                segments = diarize_audio(
+                    wav_path,
+                    num_speakers=settings.default_num_speakers,
+                )
+                logger.end_stage("diarization_time_ms")
+
+                if not segments:
+                    logger.set_quality(
+                        is_abusing=True,
+                        abusing_reason="음성이 감지되지 않았습니다",
+                        speaker_count=0,
+                        segment_count=0,
+                    )
+                    await store.update_job(job_id, {
+                        "status": "completed",
+                        "isGenerated": True,
+                        "isAbusing": True,
+                        "abusingReason": "음성이 감지되지 않았습니다",
+                        "duration": duration,
+                        "title": "",
+                        "simpleSummary": "",
+                        "consultationSummary": None,
+                    })
+                    logger.complete("completed")
+                    await logger.save_to_s3()
+                    return
+
+                unique_speakers = set(seg[2] for seg in segments)
+                logger.set_quality(speaker_count=len(unique_speakers))
+
+                # 4. Transcribe (구간별 mini-transcribe)
+                current_stage = "transcription"
+                logger.start_stage()
+                audio = AudioSegment.from_file(str(wav_path))
+                diarized_lines = []
+
+                for start, end, speaker in segments:
+                    seg_duration = end - start
+                    if seg_duration < settings.min_segment_duration:
+                        continue
+
+                    seg_audio = audio[int(start * 1000):int(end * 1000)]
+
+                    try:
+                        text = transcribe_segment(
+                            seg_audio,
+                            language=settings.default_language,
+                            model=settings.stt_model,
+                        )
+                    except Exception:
+                        text = ""
+
+                    if text:
+                        line = f"[{speaker}] {seconds_to_time_str(start)}–{seconds_to_time_str(end)}: {text}"
+                        diarized_lines.append(line)
+
+                logger.end_stage("transcription_time_ms")
+                logger.set_quality(segment_count=len(diarized_lines))
 
             if not diarized_lines:
                 logger.set_quality(

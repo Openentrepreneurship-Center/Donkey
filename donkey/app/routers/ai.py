@@ -76,6 +76,7 @@ async def get_ai_result(
 
     처리 중이면 202, 완료되면 200과 함께 결과를 반환합니다.
     """
+    job_id = job_id.strip().strip('"\'')
     store = await get_job_store()
     job = await store.get_job(job_id)
 

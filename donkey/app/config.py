@@ -22,9 +22,18 @@ class Settings(BaseSettings):
     stt_model: str = "gpt-4o-mini-transcribe"
     chat_model: str = "gpt-4o-mini"
 
+    # 화자 분리: Whisper 구간 + 오디오 특징 클러스터링 (규칙 기반, CPU만 사용)
+    use_rule_based_diarization: bool = True
+    whisper_segment_model: str = "whisper-1"
+    # True = Resemblyzer 화자 임베딩(가벼움), False = MFCC+피치 기반
+    use_resemblyzer_embedding: bool = True
+    # True = 오디오 없이 LLM이 구간별 DOCTOR/PATIENT만 붙임 (진료 대화에 유리)
+    use_llm_only_speaker_labeling: bool = True
+
     # Processing defaults
     default_language: str = "ko"
     min_segment_duration: float = 0.6
+    # 나중에 여러 화자(3+) 지원 시 사용. 현재 규칙 기반 화자 분리는 2명 고정
     default_num_speakers: int | None = None
 
     # Job expiration (seconds)

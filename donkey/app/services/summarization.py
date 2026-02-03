@@ -36,6 +36,7 @@ SOAP(Subjective, Objective, Assessment, Plan) 형식으로 요약해줘.
 - 전사에 없는 내용은 절대 추가하지 말 것(추측 금지)
 - 모호하면 "불명확" 또는 "언급 없음"으로 표시
 - 진료 핵심(증상/병력/검사/설명/진단 추정/계획)을 우선
+- 질문 문장 앞에 Q. 등 접두사 붙이지 말 것
 
 [전사]
 {diarized_text}
@@ -120,6 +121,11 @@ def parse_soap_to_consultation_summary(
     - Assessment -> (included in doctorNotes)
     - Plan -> prescriptionAndCare
     """
+
+    def _strip_question_prefix(text: str) -> str:
+        """질문 접두사 Q. / Q. 제거."""
+        return re.sub(r"^Q\.\s*", "", text.strip()).strip()
+
     # Parse SOAP sections
     sections = {"S": [], "O": [], "A": [], "P": []}
     current_section = None
@@ -146,7 +152,7 @@ def parse_soap_to_consultation_summary(
 
         # Add content to current section
         if current_section and line.startswith(("-", "•", "*", "·")):
-            content = line.lstrip("-•*· ").strip()
+            content = _strip_question_prefix(line.lstrip("-•*· "))
             if content:
                 sections[current_section].append(content)
 
@@ -171,9 +177,9 @@ def parse_soap_to_consultation_summary(
         match = re.match(r"\[([^\]]+)\]\s*[\d:.\-–]+:\s*(.+)", line)
         if match:
             speaker = match.group(1)
-            content = match.group(2).strip()
-            # Determine role based on speaker pattern
-            role = "doctor" if "0" in speaker else "patient"
+            content = _strip_question_prefix(match.group(2))
+            # SPEAKER_00=의사, SPEAKER_01=환자 (정확히 00만 의사로, 01은 환자)
+            role = "doctor" if speaker == "SPEAKER_00" else "patient"
             conversation_content.append(ConversationItem(
                 role=role,
                 index=idx,
