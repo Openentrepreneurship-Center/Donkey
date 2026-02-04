@@ -31,8 +31,9 @@ SOAP(Subjective, Objective, Assessment, Plan) 형식으로 요약해줘.
 
 요구사항:
 - 한국어
-- S/O/A/P 각 섹션 제목 포함
-- 각 섹션은 불릿 포인트로 간결하게
+- 반드시 섹션 제목을 한 줄에 쓴 뒤, 그 다음 줄부터 해당 섹션 내용을 적어줘.
+  섹션 제목: Subjective (또는 S), Objective (또는 O), Assessment (또는 A), Plan (또는 P)
+- 각 섹션 내용은 불릿(- 또는 •)으로 시작하는 문장으로 간결하게 나열
 - 전사에 없는 내용은 절대 추가하지 말 것(추측 금지)
 - 모호하면 "불명확" 또는 "언급 없음"으로 표시
 - 진료 핵심(증상/병력/검사/설명/진단 추정/계획)을 우선
@@ -111,15 +112,13 @@ def generate_simple_summary(diarized_text: str, chat_model: str = "gpt-4o-mini")
 def parse_soap_to_consultation_summary(
     soap_text: str,
     diarized_lines: list[str],
-) -> ConsultationSummary:
+) -> tuple[ConsultationSummary, dict[str, list[str]]]:
     """
-    Parse SOAP text and diarized lines into ConsultationSummary structure.
+    Parse SOAP text and diarized lines into ConsultationSummary and raw SOAP sections.
 
-    SOAP sections:
-    - Subjective -> symptomRecord
-    - Objective -> doctorNotes + testResults
-    - Assessment -> (included in doctorNotes)
-    - Plan -> prescriptionAndCare
+    Returns (ConsultationSummary, soap_dict) where soap_dict is {"S": [], "O": [], "A": [], "P": []}.
+    SOAP sections: Subjective->symptomRecord, Objective->doctorNotes+testResults,
+    Assessment->doctorNotes, Plan->prescriptionAndCare.
     """
 
     def _strip_question_prefix(text: str) -> str:
@@ -135,24 +134,73 @@ def parse_soap_to_consultation_summary(
         if not line:
             continue
 
-        # Detect section headers
+        # 마크다운 볼드 헤더: **S (Subjective)** , **O (Objective)** 등
+        if "**" in line:
+            upper = line.upper()
+            if "(SUBJECTIVE)" in upper or upper.strip().startswith("**S "):
+                current_section = "S"
+                continue
+            if "(OBJECTIVE)" in upper or upper.strip().startswith("**O "):
+                current_section = "O"
+                continue
+            if "(ASSESSMENT)" in upper or upper.strip().startswith("**A "):
+                current_section = "A"
+                continue
+            if "(PLAN)" in upper or upper.strip().startswith("**P "):
+                current_section = "P"
+                continue
+
+        # Detect section headers (English, plain)
         upper = line.upper()
-        if upper.startswith("SUBJECTIVE") or upper.startswith("S:") or upper.startswith("S ") or upper == "S":
+        if upper.startswith("SUBJECTIVE") or upper.startswith("S:") or upper.startswith("S ") or upper == "S" or (upper == "S."):
             current_section = "S"
             continue
-        elif upper.startswith("OBJECTIVE") or upper.startswith("O:") or upper.startswith("O ") or upper == "O":
+        elif upper.startswith("OBJECTIVE") or upper.startswith("O:") or upper.startswith("O ") or upper == "O" or (upper == "O."):
             current_section = "O"
             continue
-        elif upper.startswith("ASSESSMENT") or upper.startswith("A:") or upper.startswith("A ") or upper == "A":
+        elif upper.startswith("ASSESSMENT") or upper.startswith("A:") or upper.startswith("A ") or upper == "A" or (upper == "A."):
             current_section = "A"
             continue
-        elif upper.startswith("PLAN") or upper.startswith("P:") or upper.startswith("P ") or upper == "P":
+        elif upper.startswith("PLAN") or upper.startswith("P:") or upper.startswith("P ") or upper == "P" or (upper == "P."):
+            current_section = "P"
+            continue
+
+        # 한글 섹션 헤더 (주관적, 객관적, 평가, 계획)
+        if line.startswith("주관적") or line.startswith("Subjective"):
+            current_section = "S"
+            continue
+        if line.startswith("객관적") or line.startswith("Objective"):
+            current_section = "O"
+            continue
+        if line.startswith("평가") or line.startswith("Assessment"):
+            current_section = "A"
+            continue
+        if line.startswith("계획") or line.startswith("Plan"):
             current_section = "P"
             continue
 
         # Add content to current section
-        if current_section and line.startswith(("-", "•", "*", "·")):
-            content = _strip_question_prefix(line.lstrip("-•*· "))
+        if not current_section:
+            continue
+        # 불릿: -, •, *, ·
+        if line.startswith(("-", "•", "*", "·")):
+            content = _strip_question_prefix(line.lstrip("-•*· ").strip())
+            if content:
+                sections[current_section].append(content)
+            continue
+        # 번호 목록: 1. 2. 또는 1) 2)
+        num_bullet = re.match(r"^\d+[.)]\s*(.+)", line)
+        if num_bullet:
+            content = _strip_question_prefix(num_bullet.group(1).strip())
+            if content:
+                sections[current_section].append(content)
+            continue
+        # 푸터/안내 문구 제외 (※ 참고: ...)
+        if line.startswith("※"):
+            continue
+        # 현재 섹션인데 헤더가 아니면 한 줄 내용으로 처리 (일부 모델이 불릿 없이 출력하는 경우)
+        if current_section and len(line) > 2 and not re.match(r"^[A-Za-z]\s*[.:)]", line):
+            content = _strip_question_prefix(line)
             if content:
                 sections[current_section].append(content)
 
@@ -186,10 +234,12 @@ def parse_soap_to_consultation_summary(
                 content=content,
             ))
 
-    return ConsultationSummary(
+    consultation = ConsultationSummary(
         doctorNotes=doctor_notes,
         testResults=test_results,
         symptomRecord=sections["S"],
         prescriptionAndCare=sections["P"],
         conversationContent=conversation_content,
     )
+    soap_dict = {"S": sections["S"], "O": sections["O"], "A": sections["A"], "P": sections["P"]}
+    return consultation, soap_dict

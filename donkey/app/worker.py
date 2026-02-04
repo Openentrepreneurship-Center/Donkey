@@ -20,7 +20,7 @@ from app.services.summarization import (
     generate_simple_summary,
     parse_soap_to_consultation_summary,
 )
-from app.services.pii_filter import filter_pii
+from app.services.pii_filter import filter_pii, filter_pii_with_screening
 from app.services.validation import validate_medical_conversation
 from app.services.job_logger import JobLogger
 
@@ -99,6 +99,9 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                         "isGenerated": True,
                         "isAbusing": True,
                         "abusingReason": "음성이 감지되지 않았습니다",
+                        "isScreening": False,
+                        "screeningReason": "해당되는 내용 없음.",
+                        "screening": {"names": [], "phones": []},
                         "duration": duration,
                         "title": "",
                         "simpleSummary": "",
@@ -157,6 +160,9 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                         "isGenerated": True,
                         "isAbusing": True,
                         "abusingReason": "음성이 감지되지 않았습니다",
+                        "isScreening": False,
+                        "screeningReason": "해당되는 내용 없음.",
+                        "screening": {"names": [], "phones": []},
                         "duration": duration,
                         "title": "",
                         "simpleSummary": "",
@@ -208,6 +214,9 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "isGenerated": True,
                     "isAbusing": True,
                     "abusingReason": "전사할 수 있는 음성이 없습니다",
+                    "isScreening": False,
+                    "screeningReason": "해당되는 내용 없음.",
+                    "screening": {"names": [], "phones": []},
                     "duration": duration,
                     "title": "",
                     "simpleSummary": "",
@@ -238,6 +247,9 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "isGenerated": True,
                     "isAbusing": True,
                     "abusingReason": abuse_reason or "진료 대화가 아님",
+                    "isScreening": False,
+                    "screeningReason": "해당되는 내용 없음.",
+                    "screening": {"names": [], "phones": []},
                     "duration": duration,
                     "title": "",
                     "simpleSummary": "",
@@ -250,8 +262,11 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             # 6. Filter PII
             current_stage = "pii_filter"
             logger.start_stage()
-            filtered_text = filter_pii(diarized_text)
+            filtered_text, screening_data = filter_pii_with_screening(diarized_text)
             filtered_lines = [filter_pii(line) for line in diarized_lines]
+            is_screening = bool(screening_data["names"] or screening_data["phones"])
+            screening_reason = "해당되는 내용 발견." if is_screening else "해당되는 내용 없음."
+            screening = {"names": screening_data["names"], "phones": screening_data["phones"]}
             logger.end_stage("pii_filter_time_ms")
 
             # 7. Generate summaries
@@ -263,7 +278,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             logger.end_stage("summarization_time_ms")
 
             # Parse SOAP into structured format
-            consultation_summary = parse_soap_to_consultation_summary(
+            consultation_summary, soap_sections = parse_soap_to_consultation_summary(
                 soap_text,
                 filtered_lines,
             )
@@ -282,9 +297,13 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 "isGenerated": True,
                 "isAbusing": False,
                 "abusingReason": "",
+                "isScreening": is_screening,
+                "screeningReason": screening_reason,
+                "screening": screening,
                 "duration": duration,
                 "title": title,
                 "simpleSummary": simple_summary,
+                "soap": soap_sections,
                 "consultationSummary": consultation_summary.model_dump(),
             })
 
@@ -307,6 +326,9 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             "isGenerated": False,
             "isAbusing": False,
             "abusingReason": "",
+            "isScreening": False,
+            "screeningReason": "해당되는 내용 없음.",
+            "screening": {"names": [], "phones": []},
         })
 
     finally:

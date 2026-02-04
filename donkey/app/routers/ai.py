@@ -10,6 +10,8 @@ from app.schemas.response import (
     AIResponse,
     AIResultBody,
     ConsultationSummary,
+    Screening,
+    SoapSummary,
 )
 from app.store.redis import get_job_store
 from app.worker import process_audio_job
@@ -45,9 +47,13 @@ async def create_ai_job(
         "isGenerated": False,
         "isAbusing": False,
         "abusingReason": "",
+        "isScreening": False,
+        "screeningReason": "해당되는 내용 없음.",
+        "screening": {"names": [], "phones": []},
         "title": "",
         "duration": 0,
         "simpleSummary": "",
+        "soap": None,
         "consultationSummary": None,
     })
 
@@ -94,6 +100,14 @@ async def get_ai_result(
     if job.get("consultationSummary"):
         consultation_summary = ConsultationSummary(**job["consultationSummary"])
 
+    # Build screening (default when not yet set)
+    screening_data = job.get("screening") or {"names": [], "phones": []}
+    screening = Screening(**screening_data)
+
+    # Build SOAP (null when not yet generated)
+    soap_data = job.get("soap")
+    soap = SoapSummary(**soap_data) if soap_data else None
+
     result_body = AIResultBody(
         id=job_id,
         title=job.get("title", ""),
@@ -101,7 +115,11 @@ async def get_ai_result(
         isGenerated=is_generated,
         isAbusing=job.get("isAbusing", False),
         abusingReason=job.get("abusingReason", ""),
+        isScreening=job.get("isScreening", False),
+        screeningReason=job.get("screeningReason", "해당되는 내용 없음."),
+        screening=screening,
         simpleSummary=job.get("simpleSummary", ""),
+        soap=soap,
         consultationSummary=consultation_summary,
     )
 
