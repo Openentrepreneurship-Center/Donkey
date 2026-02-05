@@ -12,14 +12,6 @@ class Screening(BaseModel):
     phones: list[str] = Field(default_factory=list, description="스크리닝된 전화번호 목록")
 
 
-class SoapSummary(BaseModel):
-    """SOAP(Subjective, Objective, Assessment, Plan) 요약 구조."""
-    S: list[str] = Field(default_factory=list, description="Subjective - 증상/주호소")
-    O: list[str] = Field(default_factory=list, description="Objective - 소견/검사")
-    A: list[str] = Field(default_factory=list, description="Assessment - 평가/진단")
-    P: list[str] = Field(default_factory=list, description="Plan - 처방/계획")
-
-
 class ConsultationSummary(BaseModel):
     doctorNotes: list[str] = Field(default_factory=list, description="의사 소견")
     testResults: list[str] = Field(default_factory=list, description="검사 결과")
@@ -39,8 +31,7 @@ class AIResultBody(BaseModel):
     screeningReason: str = Field(..., description="스크리닝 사유 (해당되는 내용 발견/없음)")
     screening: Screening = Field(..., description="스크리닝된 이름·전화번호 목록")
     simpleSummary: str = Field(..., description="간단 요약")
-    soap: SoapSummary | None = Field(None, description="SOAP(S/O/A/P) 요약")
-    consultationSummary: ConsultationSummary | None = Field(None, description="진료 요약")
+    consultationSummary: ConsultationSummary | None = Field(None, description="진료 요약 (S→symptomRecord, O→testResults, A→doctorNotes, P→prescriptionAndCare)")
 
 
 class AIResponse(BaseModel):

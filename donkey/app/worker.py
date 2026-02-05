@@ -204,11 +204,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             simple_summary = generate_simple_summary(filtered_text, settings.chat_model)
             logger.end_stage("summarization_time_ms")
 
-            # Parse SOAP into structured format
-            consultation_summary, soap_sections = parse_soap_to_consultation_summary(
-                soap_text,
-                filtered_lines,
-            )
+            # Parse SOAP into consultationSummary (S→symptomRecord, O→testResults, A→doctorNotes, P→prescriptionAndCare)
+            consultation_summary = parse_soap_to_consultation_summary(soap_text, filtered_lines)
 
             # Set final quality metrics
             logger.set_quality(
@@ -230,7 +227,6 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 "duration": duration,
                 "title": title,
                 "simpleSummary": simple_summary,
-                "soap": soap_sections,
                 "consultationSummary": consultation_summary.model_dump(),
             })
 

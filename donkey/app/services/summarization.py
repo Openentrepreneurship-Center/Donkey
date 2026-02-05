@@ -112,13 +112,12 @@ def generate_simple_summary(diarized_text: str, chat_model: str = "gpt-4o-mini")
 def parse_soap_to_consultation_summary(
     soap_text: str,
     diarized_lines: list[str],
-) -> tuple[ConsultationSummary, dict[str, list[str]]]:
+) -> ConsultationSummary:
     """
-    Parse SOAP text and diarized lines into ConsultationSummary and raw SOAP sections.
+    Parse SOAP text and diarized lines into ConsultationSummary.
 
-    Returns (ConsultationSummary, soap_dict) where soap_dict is {"S": [], "O": [], "A": [], "P": []}.
-    SOAP sections: Subjective->symptomRecord, Objective->doctorNotes+testResults,
-    Assessment->doctorNotes, Plan->prescriptionAndCare.
+    Mapping: S (Subjective) → symptomRecord, O (Objective) → testResults,
+    A (Assessment) → doctorNotes, P (Plan) → prescriptionAndCare.
     """
 
     def _strip_question_prefix(text: str) -> str:
@@ -204,20 +203,7 @@ def parse_soap_to_consultation_summary(
             if content:
                 sections[current_section].append(content)
 
-    # Separate testResults from Objective (lines mentioning 검사, 결과, etc.)
-    test_keywords = ["검사", "결과", "수치", "혈액", "X-ray", "MRI", "CT", "초음파"]
-    doctor_notes = []
-    test_results = []
-
-    for item in sections["O"]:
-        if any(kw in item for kw in test_keywords):
-            test_results.append(item)
-        else:
-            doctor_notes.append(item)
-
-    # Add Assessment to doctor notes
-    doctor_notes.extend(sections["A"])
-
+    # SOAP → consultationSummary: S→symptomRecord, O→testResults, A→doctorNotes, P→prescriptionAndCare
     # Parse conversation content from diarized lines
     conversation_content = []
     for idx, line in enumerate(diarized_lines):
@@ -235,11 +221,10 @@ def parse_soap_to_consultation_summary(
             ))
 
     consultation = ConsultationSummary(
-        doctorNotes=doctor_notes,
-        testResults=test_results,
+        doctorNotes=sections["A"],
+        testResults=sections["O"],
         symptomRecord=sections["S"],
         prescriptionAndCare=sections["P"],
         conversationContent=conversation_content,
     )
-    soap_dict = {"S": sections["S"], "O": sections["O"], "A": sections["A"], "P": sections["P"]}
-    return consultation, soap_dict
+    return consultation

@@ -11,7 +11,6 @@ from app.schemas.response import (
     AIResultBody,
     ConsultationSummary,
     Screening,
-    SoapSummary,
 )
 from app.store.redis import get_job_store
 from app.worker import process_audio_job
@@ -53,7 +52,6 @@ async def create_ai_job(
         "title": "",
         "duration": 0,
         "simpleSummary": "",
-        "soap": None,
         "consultationSummary": None,
     })
 
@@ -104,10 +102,6 @@ async def get_ai_result(
     screening_data = job.get("screening") or {"names": [], "phones": []}
     screening = Screening(**screening_data)
 
-    # Build SOAP (null when not yet generated)
-    soap_data = job.get("soap")
-    soap = SoapSummary(**soap_data) if soap_data else None
-
     result_body = AIResultBody(
         id=job_id,
         title=job.get("title", ""),
@@ -119,7 +113,6 @@ async def get_ai_result(
         screeningReason=job.get("screeningReason", "해당되는 내용 없음."),
         screening=screening,
         simpleSummary=job.get("simpleSummary", ""),
-        soap=soap,
         consultationSummary=consultation_summary,
     )
 
