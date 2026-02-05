@@ -15,7 +15,7 @@ async def download_audio(url: str, dest_path: Path) -> None:
 
 
 def ensure_wav_16k_mono(input_path: str | Path) -> Path:
-    """Convert audio to 16kHz mono WAV format for pyannote compatibility."""
+    """Convert audio to 16kHz mono WAV format for Whisper and downstream processing."""
     input_path = Path(input_path)
 
     if input_path.suffix.lower() == ".wav":

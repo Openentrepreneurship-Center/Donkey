@@ -50,7 +50,7 @@ except ImportError:
     _VoiceEncoder = None
     _RESEMBLYZER_AVAILABLE = False
 
-# 현재는 2명(의사/환자). 나중에 config.default_num_speakers 로 확장 가능
+# 현재는 2명(의사/환자). 나중에 3명 이상 화자 확장 가능
 N_SPEAKERS = 2
 
 F0_MIN = 75.0

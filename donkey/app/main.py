@@ -10,8 +10,6 @@ from app.store.redis import get_redis_client
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: preload diarization pipeline
-    # This is done lazily on first request to avoid blocking startup
     yield
     # Shutdown: close Redis connection
     try:
