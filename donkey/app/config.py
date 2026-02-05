@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # Job expiration (seconds)
     job_ttl: int = 86400  # 24 hours
 
+    # Whisper 전사문을 metrics/eval_data에 hypothesis txt로 저장 (지표 평가용)
+    save_whisper_to_eval_data: bool = False
+
     model_config = {
         "env_file": Path(__file__).resolve().parent.parent / ".env",
         "env_file_encoding": "utf-8",

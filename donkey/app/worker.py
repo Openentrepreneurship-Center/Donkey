@@ -79,6 +79,17 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 whisper_segments = []
             logger.end_stage("transcription_time_ms")
 
+            # Whisper 전사문을 eval_data에 hypothesis txt로 저장 (설정 시)
+            if whisper_segments and settings.save_whisper_to_eval_data:
+                try:
+                    eval_data_dir = Path(__file__).resolve().parent / "metrics" / "eval_data"
+                    eval_data_dir.mkdir(parents=True, exist_ok=True)
+                    hyp_path = eval_data_dir / f"{job_id}_hyp.txt"
+                    full_text = "\n".join((s.get("text") or "").strip() for s in whisper_segments)
+                    hyp_path.write_text(full_text.strip(), encoding="utf-8")
+                except Exception:
+                    pass  # 저장 실패 시 파이프라인은 계속 진행
+
             if not whisper_segments:
                 logger.set_quality(
                     is_abusing=True,
