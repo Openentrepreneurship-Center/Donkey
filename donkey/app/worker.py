@@ -4,7 +4,12 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.store.redis import get_job_store
-from app.services.audio import download_audio, ensure_wav_16k_mono, get_audio_duration
+from app.services.audio import (
+    download_audio,
+    ensure_wav_16k_mono,
+    get_audio_duration,
+    upload_audio_to_s3,
+)
 from app.services.rule_based_diarization import diarize_from_whisper_segments
 from app.services.transcription import transcribe_with_segments, seconds_to_time_str
 from app.services.summarization import (
@@ -62,6 +67,12 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             # Get duration
             duration = get_audio_duration(wav_path)
             logger.set_audio_duration(duration)
+
+            # 변환된 오디오를 S3 audio-data 폴더에 업로드 (설정 시)
+            try:
+                upload_audio_to_s3(wav_path, job_id)
+            except Exception:
+                pass
 
             diarized_lines: list[str]
             unique_speakers: set[str]

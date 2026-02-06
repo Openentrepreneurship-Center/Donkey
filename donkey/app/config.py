@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     s3_logs_bucket: str = ""
     s3_logs_prefix: str = "job-logs"
     aws_region: str = "ap-northeast-2"
+    # S3에 변환된 오디오(WAV) 업로드 (같은 버킷, 폴더 prefix)
+    s3_audio_prefix: str = "audio-data"
+    save_audio_to_s3: bool = True
 
     # Models
     stt_model: str = "gpt-4o-mini-transcribe"
