@@ -19,10 +19,13 @@ _FILLER_WORDS = frozenset({"음", "예", "네", "아", "어", "응", "네네", "
 
 
 def _normalize_for_eval(text: str, strip_punctuation: bool = True) -> str:
-    """한국어 STT 비교를 위한 전처리: 공백 정규화, (옵션) 특수문자·추임새 제거."""
+    """한국어 STT 비교를 위한 전처리: 괄호 및 괄호 안 제거, 공백 정규화, (옵션) 특수문자·추임새 제거."""
     if not text:
         return ""
     text = text.strip()
+    # 괄호와 괄호 안 내용 제거 (중첩 괄호도 반복 제거)
+    while re.search(r"\([^()]*\)", text):
+        text = re.sub(r"\s*\([^()]*\)\s*", " ", text)
     text = re.sub(r"\s+", " ", text)
     if strip_punctuation:
         # 특수문자 제거 후 연속 공백 하나로
