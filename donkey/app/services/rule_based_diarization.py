@@ -390,6 +390,103 @@ def _label_turns_by_llm(turns: list[list[dict]], max_chars: int = TURN_PROMPT_MA
     return all_labels
 
 
+def map_clova_speakers_to_roles(
+    segments: list[dict],
+) -> list[tuple[float, float, str]]:
+    """
+    Clova Speech에서 나온 화자 라벨을 의사(1명) / 환자(1명 이상)로 매핑.
+    LLM으로 역할 분류 후 SPEAKER_00=의사, SPEAKER_01/02/...=환자 순으로 부여.
+    segments: [{"start", "end", "text", "speaker": "1"|"2"|...}, ...]
+    Returns: [(start_sec, end_sec, "SPEAKER_00"|"SPEAKER_01"|...), ...] (입력과 동일 순서)
+    """
+    if not segments:
+        return []
+    if len(segments) == 1:
+        return [(segments[0]["start"], segments[0]["end"], "SPEAKER_00")]
+
+    # 화자별 텍스트 모음 (라벨 문자열 기준)
+    by_speaker: dict[str, list[str]] = {}
+    for s in segments:
+        label = s.get("speaker")
+        if label is None:
+            label = "0"
+        key = str(label)
+        if key not in by_speaker:
+            by_speaker[key] = []
+        text = (s.get("text") or "").strip()
+        if text:
+            by_speaker[key].append(text)
+
+    # 등장 순서 유지 (첫 등장 순)
+    seen_order: list[str] = []
+    for s in segments:
+        key = str(s.get("speaker") or "0")
+        if key not in seen_order:
+            seen_order.append(key)
+
+    # LLM: 의사 1명, 환자 0명 이상
+    labels_sorted = sorted(by_speaker.keys(), key=lambda x: (seen_order.index(x) if x in seen_order else 999, x))
+    transcript_parts = []
+    for lab in labels_sorted:
+        texts = by_speaker.get(lab, [])
+        transcript_parts.append(f"Speaker {lab}:\n" + "\n".join(texts[:50]))  # 상위 50문장으로 제한
+    transcript_blob = "\n\n".join(transcript_parts)[:12000]
+
+    settings = get_settings()
+    client = _get_openai_client()
+    system = (
+        "You are a classifier for Korean medical consultation transcripts. "
+        "Each 'Speaker N' is one person. Exactly one speaker is the doctor (의사). "
+        "The rest are patients (환자). There can be one or multiple patients. "
+        "Respond with a single JSON object only: map each speaker label to 'doctor' or 'patient'. "
+        "Example: {\"1\": \"doctor\", \"2\": \"patient\", \"3\": \"patient\"}"
+    )
+    user = f"""Classify each speaker as doctor or patient. One doctor, rest patients.
+
+{transcript_blob}
+
+Respond with JSON only, e.g. {{"1": "doctor", "2": "patient"}}:"""
+
+    try:
+        resp = client.chat.completions.create(
+            model=settings.chat_model,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            temperature=0.0,
+            max_tokens=256,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if "```" in text:
+            text = re.sub(r"```(?:json)?\s*", "", text).strip()
+        role_by_label = json.loads(text)
+    except (json.JSONDecodeError, KeyError, Exception):
+        role_by_label = {}
+
+    # clova_label -> SPEAKER_00 (의사 1명), SPEAKER_01, SPEAKER_02, ... (환자 순)
+    doctor_label: str | None = None
+    patient_labels: list[str] = []
+    for lab in labels_sorted:
+        role = (role_by_label.get(str(lab)) or "patient").lower()
+        if role == "doctor":
+            doctor_label = lab
+        else:
+            patient_labels.append(lab)
+    if not doctor_label and labels_sorted:
+        doctor_label = labels_sorted[0]
+        patient_labels = [l for l in labels_sorted if l != doctor_label]
+    label_to_speaker: dict[str, str] = {}
+    if doctor_label is not None:
+        label_to_speaker[doctor_label] = "SPEAKER_00"
+    for i, lab in enumerate(patient_labels):
+        label_to_speaker[lab] = f"SPEAKER_{i + 1:02d}"
+
+    out: list[tuple[float, float, str]] = []
+    for s in segments:
+        key = str(s.get("speaker") or "0")
+        sp = label_to_speaker.get(key, "SPEAKER_01")
+        out.append((s["start"], s["end"], sp))
+    return out
+
+
 def diarize_from_whisper_segments(
     wav_path: str | Path,
     segments: list[dict],

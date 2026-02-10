@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -24,7 +25,12 @@ class Settings(BaseSettings):
     stt_model: str = "gpt-4o-mini-transcribe"
     chat_model: str = "gpt-4o-mini"
 
-    # 화자 분리: Whisper 구간 + 턴/LLM 또는 오디오 특징 클러스터링 (규칙 기반, CPU만 사용)
+    # STT 백엔드: whisper | clova (clova 사용 시 아래 CLOVA_* 설정 필요)
+    stt_backend: str = Field(default="whisper", validation_alias="STT_BACKEND")
+    clova_speech_invoke_url: str = Field(default="", validation_alias="CLOVA_SPEECH_INVOKE_URL")
+    clova_speech_api_key: str = Field(default="", validation_alias="CLOVA_SPEECH_API_KEY")
+
+    # 화자 분리: Whisper/Clova 구간 + 턴/LLM 또는 오디오 특징 클러스터링 (규칙 기반, CPU만 사용)
     whisper_segment_model: str = "whisper-1"
     # True = Resemblyzer 화자 임베딩(가벼움), False = MFCC+피치 기반
     use_resemblyzer_embedding: bool = True
