@@ -13,13 +13,13 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # S3 Logging
-    s3_logs_bucket: str = ""
-    s3_logs_prefix: str = "job-logs"
-    aws_region: str = "ap-northeast-2"
+    # S3 Logging (비우면 Job 로그/오디오 S3 저장 안 함)
+    s3_logs_bucket: str = Field(default="", validation_alias="S3_LOGS_BUCKET")
+    s3_logs_prefix: str = Field(default="job-logs", validation_alias="S3_LOGS_PREFIX")
+    aws_region: str = Field(default="ap-northeast-2", validation_alias="AWS_REGION")
     # S3에 변환된 오디오(WAV) 업로드 (같은 버킷, 폴더 prefix)
-    s3_audio_prefix: str = "audio-data"
-    save_audio_to_s3: bool = True
+    s3_audio_prefix: str = Field(default="audio-data", validation_alias="S3_AUDIO_PREFIX")
+    save_audio_to_s3: bool = Field(default=True, validation_alias="SAVE_AUDIO_TO_S3")
 
     # Models
     stt_model: str = "gpt-4o-mini-transcribe"
