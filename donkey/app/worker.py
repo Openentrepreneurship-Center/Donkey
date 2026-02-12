@@ -1,8 +1,9 @@
 import tempfile
+import time
 import traceback
 from pathlib import Path
 
-from app.config import get_settings
+from app.config import get_settings, get_processing_timeout_seconds
 from app.store.redis import get_job_store
 from app.services.audio import (
     download_audio,
@@ -24,6 +25,34 @@ from app.services.summarization import (
 from app.services.pii_filter import filter_pii, filter_pii_with_screening
 from app.services.validation import validate_medical_conversation
 from app.services.job_logger import JobLogger
+
+# 음성 길이 기준 처리 임계 초과 시 오류 메시지
+TIMEOUT_ERROR_MESSAGE = "처리 시간이 제한을 초과했습니다. (오디오 길이 기준 임계시간)"
+
+
+async def _check_timeout_and_abort(
+    store, job_id: str, start_time: float, timeout_sec: int, logger: JobLogger
+) -> bool:
+    """처리 시간이 임계시간을 초과했으면 job을 error로 갱신하고 True 반환. 아니면 False."""
+    if (time.time() - start_time) <= timeout_sec:
+        return False
+    logger.set_error(
+        error_type="ProcessingTimeout",
+        error_message=TIMEOUT_ERROR_MESSAGE,
+        error_stage="timeout",
+    )
+    logger.complete("error")
+    await store.update_job(job_id, {
+        "status": "error",
+        "error": TIMEOUT_ERROR_MESSAGE,
+        "isGenerated": False,
+        "isAbusing": False,
+        "abusingReason": "",
+        "isScreening": False,
+        "screeningReason": "해당되는 내용 없음.",
+        "screening": {"names": [], "phones": []},
+    })
+    return True
 
 
 async def process_audio_job(job_id: str, file_url: str) -> None:
@@ -47,6 +76,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
     current_stage = ""
 
     try:
+        start_time = time.time()
         await store.update_job(job_id, {"status": "processing"})
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -67,9 +97,15 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             wav_path = ensure_wav_16k_mono(audio_path)
             logger.end_stage("conversion_time_ms")
 
-            # Get duration
+            # Get duration → 음성 길이 기준 임계시간 설정 (테스트 시 override 사용)
             duration = get_audio_duration(wav_path)
             logger.set_audio_duration(duration)
+            if settings.processing_timeout_override_seconds > 0:
+                timeout_sec = settings.processing_timeout_override_seconds
+            else:
+                timeout_sec = get_processing_timeout_seconds(duration)
+            if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
+                return
 
             # 변환된 오디오를 S3 audio-data 폴더에 업로드 (설정 시)
             try:
@@ -92,6 +128,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             except Exception:
                 whisper_segments = []
             logger.end_stage("transcription_time_ms")
+            if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
+                return
 
             # Whisper 전사문을 eval_data에 hypothesis txt로 저장 (설정 시)
             if whisper_segments and settings.save_whisper_to_eval_data:
@@ -151,6 +189,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     min_segment_duration=settings.min_segment_duration,
                 )
             logger.end_stage("diarization_time_ms")
+            if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
+                return
 
             unique_speakers = set(seg[2] for seg in diarized_segments)
             logger.set_quality(speaker_count=len(unique_speakers))
@@ -196,6 +236,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 chat_model=settings.chat_model,
             )
             logger.end_stage("validation_time_ms")
+            if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
+                return
 
             if not is_valid:
                 logger.set_quality(
@@ -228,6 +270,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             screening_reason = "해당되는 내용 발견." if is_screening else "해당되는 내용 없음."
             screening = {"names": screening_data["names"], "phones": screening_data["phones"]}
             logger.end_stage("pii_filter_time_ms")
+            if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
+                return
 
             # 7. Generate summaries
             current_stage = "summarization"
@@ -236,6 +280,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             title = generate_title(filtered_text, settings.chat_model)
             simple_summary = generate_simple_summary(filtered_text, settings.chat_model)
             logger.end_stage("summarization_time_ms")
+            if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
+                return
 
             # Parse SOAP into consultationSummary (S→symptomRecord, O→testResults, A→doctorNotes, P→prescriptionAndCare)
             consultation_summary = parse_soap_to_consultation_summary(soap_text, filtered_lines)

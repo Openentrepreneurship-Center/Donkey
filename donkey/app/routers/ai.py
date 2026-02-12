@@ -20,7 +20,7 @@ from app.schemas.response import (
     ConsultationSummary,
     Screening,
 )
-from app.schemas.error import ERROR_404, error_response
+from app.schemas.error import ERROR_404, ERROR_500, error_response
 from app.store.redis import (
     get_job_store,
     get_idempotency_job_id,
@@ -167,10 +167,12 @@ async def get_ai_result(
         ).model_dump(exclude_none=True)
         return JSONResponse(content=payload, status_code=202)
     elif status == "error":
-        return AIResponse(
-            status="error",
-            statusCode=500,
-            body=result_body,
+        # 500: 규격 오류 형식 { code, message }, job에 저장된 error 메시지 사용
+        code, default_message = ERROR_500
+        message = job.get("error") or default_message
+        return JSONResponse(
+            status_code=500,
+            content=error_response(code, message),
         )
     else:  # completed
         return AIResponse(

@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # Whisper 전사문을 metrics/eval_data에 hypothesis txt로 저장 (지표 평가용)
     save_whisper_to_eval_data: bool = False
 
+    # 테스트용: 설정 시 음성 길이와 무관하게 이 값(초)으로 임계시간 적용 (0이면 미사용)
+    processing_timeout_override_seconds: int = Field(
+        default=0,
+        validation_alias="PROCESSING_TIMEOUT_OVERRIDE_SECONDS",
+    )
+
     model_config = {
         "env_file": Path(__file__).resolve().parent.parent / ".env",
         "env_file_encoding": "utf-8",
@@ -63,3 +69,14 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_processing_timeout_seconds(audio_duration_seconds: float) -> int:
+    """입력 음성 길이(초)에 따른 처리 임계시간(초). 초과 시 오류 알람."""
+    if audio_duration_seconds <= 300:   # 5분 이하 → 1분 30초
+        return 90
+    if audio_duration_seconds <= 600:   # 10분 이하 → 2분
+        return 120
+    if audio_duration_seconds < 900:    # 10분 초과 ~ 15분 미만 → 3분
+        return 180
+    return 240  # 15분 이상 → 4분
