@@ -10,20 +10,28 @@ if not _app_logger.handlers:
     _h = logging.StreamHandler()
     _h.setLevel(logging.INFO)
     _app_logger.addHandler(_h)
+from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
 from app.routers import ai
-from app.store.redis import get_redis_client
+from app.schemas.error import (
+    error_response,
+    ERROR_400,
+    ERROR_401,
+    ERROR_404,
+    ERROR_422,
+    ERROR_429,
+    ERROR_500,
+)
+from app.store.redis import close_all_redis_clients
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    # Shutdown: close Redis connection
     try:
-        client = await get_redis_client()
-        await client.close()
+        await close_all_redis_clients()
     except Exception:
         pass
 
@@ -41,15 +49,33 @@ app.include_router(ai.router)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=422,
-        content={
-            "status": "error",
-            "statusCode": 422,
-            "message": "Validation error",
-            "details": exc.errors(),
-        },
+    """422: Schema 검증 실패."""
+    code, message = ERROR_422
+    return JSONResponse(status_code=422, content=error_response(code, message))
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTPException 시 규격 오류 본문 { code, message } 로 반환."""
+    if isinstance(exc.detail, dict) and "code" in exc.detail and "message" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    status_to_error = {
+        400: ERROR_400,
+        401: ERROR_401,
+        404: ERROR_404,
+        429: ERROR_429,
+    }
+    code, message = status_to_error.get(
+        exc.status_code, ("COMMON_500_000", str(exc.detail) if exc.detail else "Unknown error")
     )
+    return JSONResponse(status_code=exc.status_code, content=error_response(code, message))
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """500: 미처리 예외."""
+    code, message = ERROR_500
+    return JSONResponse(status_code=500, content=error_response(code, message))
 
 
 @app.get("/health", summary="헬스 체크", description="서버 상태를 확인합니다.")

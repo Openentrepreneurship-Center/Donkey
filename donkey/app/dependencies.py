@@ -1,6 +1,7 @@
 from fastapi import Header, HTTPException, Depends
 
 from app.config import Settings, get_settings
+from app.schemas.error import ERROR_401, error_response
 
 
 async def verify_api_key(
@@ -10,6 +11,6 @@ async def verify_api_key(
     if x_api_key != settings.api_key:
         raise HTTPException(
             status_code=401,
-            detail={"status": "error", "message": "Invalid API key"},
+            detail=error_response(*ERROR_401),
         )
     return x_api_key

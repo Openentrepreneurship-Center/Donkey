@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any
 
@@ -40,25 +41,38 @@ class RedisJobStore(JobStore):
         await self._redis.delete(key)
 
 
-_redis_client: redis.Redis | None = None
-_job_store: RedisJobStore | None = None
+# 루프별 클라이언트/스토어 (워커가 별도 스레드의 이벤트 루프에서 돌 때 각자 연결 사용)
+_redis_by_loop: dict[int, redis.Redis] = {}
+_job_store_by_loop: dict[int, RedisJobStore] = {}
 
 
 async def get_redis_client() -> redis.Redis:
-    global _redis_client
-    if _redis_client is None:
+    loop = asyncio.get_running_loop()
+    key = id(loop)
+    if key not in _redis_by_loop:
         settings = get_settings()
-        _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
-    return _redis_client
+        _redis_by_loop[key] = redis.from_url(settings.redis_url, decode_responses=True)
+    return _redis_by_loop[key]
 
 
 async def get_job_store() -> RedisJobStore:
-    global _job_store
-    if _job_store is None:
+    loop = asyncio.get_running_loop()
+    key = id(loop)
+    if key not in _job_store_by_loop:
         client = await get_redis_client()
         settings = get_settings()
-        _job_store = RedisJobStore(client, ttl=settings.job_ttl)
-    return _job_store
+        _job_store_by_loop[key] = RedisJobStore(client, ttl=settings.job_ttl)
+    return _job_store_by_loop[key]
+
+
+async def close_all_redis_clients() -> None:
+    """종료 시 루프별 Redis 연결 모두 닫기."""
+    for key, client in list(_redis_by_loop.items()):
+        try:
+            await client.close()
+        except Exception:
+            pass
+        _redis_by_loop.pop(key, None)
 
 
 _IDEMPOTENCY_PREFIX = "donkey:idempotency:"

@@ -37,7 +37,8 @@ class AIResultBody(BaseModel):
 class AIResponse(BaseModel):
     status: str = Field(..., description="응답 상태 (ok/error)")
     statusCode: int = Field(..., description="HTTP 상태 코드")
-    body: AIResultBody = Field(..., description="응답 본문")
+    body: AIResultBody | None = Field(None, description="결과 본문 (202 진행 중일 땐 없음)")
+    message: str | None = Field(None, description="202일 때: 'AI 실행 결과가 진행 중'")
 
 
 class AICreateBody(BaseModel):

@@ -1,9 +1,11 @@
+import asyncio
 import hashlib
 import logging
 import uuid
 from urllib.parse import urlparse, urlunparse
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +20,22 @@ from app.schemas.response import (
     ConsultationSummary,
     Screening,
 )
+from app.schemas.error import ERROR_404, error_response
 from app.store.redis import (
     get_job_store,
     get_idempotency_job_id,
     set_idempotency_mapping_nx,
 )
 from app.worker import process_audio_job
+
+
+def _run_worker_sync(job_id: str, file_url: str) -> None:
+    """스레드에서 별도 이벤트 루프로 워커 실행 → 메인 루프가 조회 API 등 즉시 처리 가능."""
+    asyncio.run(process_audio_job(job_id, file_url))
+
+
+async def _run_worker_in_thread(job_id: str, file_url: str) -> None:
+    await asyncio.to_thread(_run_worker_sync, job_id, file_url)
 
 
 router = APIRouter(prefix="/ai", tags=["AI 처리"])
@@ -87,8 +99,8 @@ async def create_ai_job(
         "consultationSummary": None,
     })
 
-    # Start background processing
-    background_tasks.add_task(process_audio_job, job_id, file_url)
+    # Start background processing (스레드 풀에서 실행해 메인 루프 블로킹 방지 → 조회 API 즉시 202/200 응답)
+    background_tasks.add_task(_run_worker_in_thread, job_id, file_url)
 
     return AICreateResponse(
         status="ok",
@@ -100,6 +112,7 @@ async def create_ai_job(
 @router.get(
     "/{job_id}",
     response_model=AIResponse,
+    response_model_exclude_none=True,
     summary="AI 작업 결과 조회",
     description="AI 처리 작업의 결과를 조회합니다.",
 )
@@ -117,10 +130,7 @@ async def get_ai_result(
     job = await store.get_job(job_id)
 
     if job is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"status": "error", "message": "Job not found"},
-        )
+        raise HTTPException(status_code=404, detail=error_response(*ERROR_404))
 
     status = job.get("status", "pending")
     is_generated = job.get("isGenerated", False)
@@ -149,11 +159,13 @@ async def get_ai_result(
     )
 
     if status == "pending" or status == "processing":
-        return AIResponse(
+        payload = AIResponse(
             status="ok",
             statusCode=202,
-            body=result_body,
-        )
+            body=None,
+            message="AI 실행 결과가 진행 중",
+        ).model_dump(exclude_none=True)
+        return JSONResponse(content=payload, status_code=202)
     elif status == "error":
         return AIResponse(
             status="error",
