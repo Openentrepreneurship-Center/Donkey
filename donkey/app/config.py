@@ -59,6 +59,12 @@ class Settings(BaseSettings):
         validation_alias="PROCESSING_TIMEOUT_OVERRIDE_SECONDS",
     )
 
+    # 동시 처리 job 수 (이 수만큼 동시에 전사·요약 처리)
+    max_concurrent_jobs: int = Field(
+        default=3,
+        validation_alias="MAX_CONCURRENT_JOBS",
+    )
+
     model_config = {
         "env_file": Path(__file__).resolve().parent.parent / ".env",
         "env_file_encoding": "utf-8",

@@ -4,7 +4,7 @@ import logging
 import uuid
 from urllib.parse import urlparse, urlunparse
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -34,8 +34,16 @@ def _run_worker_sync(job_id: str, file_url: str) -> None:
     asyncio.run(process_audio_job(job_id, file_url))
 
 
-async def _run_worker_in_thread(job_id: str, file_url: str) -> None:
-    await asyncio.to_thread(_run_worker_sync, job_id, file_url)
+async def _schedule_worker_with_limit(app, job_id: str, file_url: str) -> None:
+    """동시 실행 수 제한(세마포어) 안에서 워커를 스레드에 맡기고 즉시 반환. 완료 시 세마포어 해제."""
+    semaphore: asyncio.Semaphore = app.state.job_semaphore
+    await semaphore.acquire()
+    task = asyncio.create_task(asyncio.to_thread(_run_worker_sync, job_id, file_url))
+
+    def _release(_: asyncio.Task) -> None:
+        semaphore.release()
+
+    task.add_done_callback(_release)
 
 
 router = APIRouter(prefix="/ai", tags=["AI 처리"])
@@ -48,6 +56,7 @@ router = APIRouter(prefix="/ai", tags=["AI 처리"])
     description="오디오 전사 및 SOAP 요약을 위한 새 AI 처리 작업을 생성합니다.",
 )
 async def create_ai_job(
+    req: Request,
     request: AIRequest,
     background_tasks: BackgroundTasks,
     _api_key: str = Depends(verify_api_key),
@@ -100,7 +109,7 @@ async def create_ai_job(
     })
 
     # Start background processing (스레드 풀에서 실행해 메인 루프 블로킹 방지 → 조회 API 즉시 202/200 응답)
-    background_tasks.add_task(_run_worker_in_thread, job_id, file_url)
+    background_tasks.add_task(_schedule_worker_with_limit, req.app, job_id, file_url)
 
     return AICreateResponse(
         status="ok",

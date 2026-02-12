@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -24,11 +25,14 @@ from app.schemas.error import (
     ERROR_429,
     ERROR_500,
 )
+from app.config import get_settings
 from app.store.redis import close_all_redis_clients
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings = get_settings()
+    app.state.job_semaphore = asyncio.Semaphore(settings.max_concurrent_jobs)
     yield
     try:
         await close_all_redis_clients()
