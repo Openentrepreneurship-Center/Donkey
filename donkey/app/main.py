@@ -1,6 +1,15 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+
+# app 하위 logger가 INFO 이상 출력되도록 (uvicorn 콘솔에 보이게)
+_app_logger = logging.getLogger("app")
+_app_logger.setLevel(logging.INFO)
+if not _app_logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setLevel(logging.INFO)
+    _app_logger.addHandler(_h)
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 

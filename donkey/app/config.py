@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # Job expiration (seconds)
     job_ttl: int = 86400  # 24 hours
 
+    # 멱등성: 같은 요청(file URL)이 N초 안에 다시 오면 기존 job_id 반환
+    idempotency_window_seconds: int = Field(
+        default=30,
+        validation_alias="IDEMPOTENCY_WINDOW_SECONDS",
+    )
+
     # Whisper 전사문을 metrics/eval_data에 hypothesis txt로 저장 (지표 평가용)
     save_whisper_to_eval_data: bool = False
 
