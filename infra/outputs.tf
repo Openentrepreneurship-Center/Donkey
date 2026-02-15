@@ -24,8 +24,18 @@ output "ssm_command" {
 }
 
 output "api_url" {
-  description = "API endpoint URL"
-  value       = "http://${aws_eip.main.public_ip}:8000"
+  description = "API endpoint URL (port 8000)"
+  value       = "http://${var.domain_name}:8000"
+}
+
+output "domain_name" {
+  description = "Primary domain"
+  value       = var.domain_name
+}
+
+output "route53_nameservers" {
+  description = "Route 53 nameservers - set these at your domain registrar for donkey.ai.kr"
+  value       = aws_route53_zone.main.name_servers
 }
 
 output "s3_logs_bucket" {

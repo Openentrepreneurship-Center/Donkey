@@ -36,6 +36,11 @@ resource "aws_key_pair" "main" {
     Name    = "${var.project_name}-key"
     Project = var.project_name
   }
+
+  # 기존 키 페어 import 시 Terraform이 새 키로 교체하지 않도록
+  lifecycle {
+    ignore_changes = [public_key]
+  }
 }
 
 resource "local_file" "private_key" {
@@ -104,13 +109,29 @@ resource "aws_security_group" "main" {
   name        = "${var.project_name}-sg"
   description = "Security group for ${var.project_name}"
 
-  # API access (port 8000)
+  # API access (port 8000, optional - Caddy handles 80/443)
   ingress {
     from_port   = 8000
     to_port     = 8000
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
     description = "API access"
+  }
+
+  # HTTP / HTTPS (Caddy → Let's Encrypt, reverse proxy)
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP"
+  }
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS"
   }
 
   # Outbound traffic
@@ -212,6 +233,11 @@ resource "aws_instance" "main" {
     Project     = var.project_name
     Environment = "dev"
   }
+
+  # 기존 인스턴스 import 시 설정 차이로 교체되지 않도록
+  lifecycle {
+    ignore_changes = [ami, instance_type, user_data, root_block_device]
+  }
 }
 
 # Elastic IP
@@ -223,6 +249,25 @@ resource "aws_eip" "main" {
     Name    = "${var.project_name}-eip"
     Project = var.project_name
   }
+}
+
+# Route 53 - DNS for donkey.ai.kr
+resource "aws_route53_zone" "main" {
+  name = var.domain_name
+
+  tags = {
+    Name    = "${var.project_name}-zone"
+    Project = var.project_name
+  }
+}
+
+# A record: donkey.ai.kr -> EC2 Elastic IP
+resource "aws_route53_record" "api" {
+  zone_id = aws_route53_zone.main.zone_id
+  name    = var.domain_name
+  type    = "A"
+  ttl     = 300
+  records = [aws_eip.main.public_ip]
 }
 
 # S3 Bucket for logs
@@ -241,6 +286,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "logs" {
   rule {
     id     = "expire-old-logs"
     status = "Enabled"
+
+    filter {} # entire bucket
 
     expiration {
       days = 90

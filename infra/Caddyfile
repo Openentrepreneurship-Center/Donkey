@@ -1,0 +1,4 @@
+# HTTPS 자동 발급(Let's Encrypt) + FastAPI 리버스 프록시
+donkey.ai.kr {
+    reverse_proxy donkey-api:8000
+}
