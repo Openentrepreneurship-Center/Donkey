@@ -22,3 +22,9 @@ variable "domain_name" {
   default     = "donkey.ai.kr"
 }
 
+variable "rds_username" {
+  description = "RDS MySQL master username"
+  type        = string
+  default     = "donkey"
+}
+

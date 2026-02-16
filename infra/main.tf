@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/local"
       version = "~> 2.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -332,4 +336,95 @@ resource "aws_iam_role_policy" "s3_policy" {
       }
     ]
   })
+}
+
+# ---------------------------------------------------------------------------
+# RDS MySQL (db.t4g.micro) - 진료/로그/요약 저장
+# ---------------------------------------------------------------------------
+
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+resource "aws_db_subnet_group" "main" {
+  name       = "${var.project_name}-db-subnet"
+  subnet_ids = data.aws_subnets.default.ids
+
+  tags = {
+    Name    = "${var.project_name}-db-subnet"
+    Project = var.project_name
+  }
+}
+
+resource "aws_security_group" "rds" {
+  name        = "${var.project_name}-rds-sg"
+  description = "Allow MySQL from app server only"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [aws_security_group.main.id]
+    description     = "MySQL from EC2 app"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name    = "${var.project_name}-rds-sg"
+    Project = var.project_name
+  }
+}
+
+resource "random_password" "rds" {
+  length  = 24
+  special = false
+}
+
+resource "aws_db_instance" "main" {
+  identifier     = "${var.project_name}-mysql"
+  engine         = "mysql"
+  engine_version = "8.0"
+  instance_class = "db.t4g.micro"
+
+  allocated_storage     = 20
+  storage_type          = "gp3"
+  max_allocated_storage = 100
+
+  db_name  = var.project_name
+  username = var.rds_username
+  password = random_password.rds.result
+
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+  publicly_accessible    = false
+
+  skip_final_snapshot = true
+  backup_retention_period = 7
+
+  tags = {
+    Name    = "${var.project_name}-mysql"
+    Project = var.project_name
+  }
+}
+
+# DATABASE_URL를 SSM에 저장 → 배포 시 GitHub Actions가 읽어서 .env에 넣음
+resource "aws_ssm_parameter" "database_url" {
+  name        = "/${var.project_name}/DATABASE_URL"
+  description = "MySQL connection URL for Donkey API"
+  type        = "SecureString"
+  value = "mysql+asyncmy://${var.rds_username}:${random_password.rds.result}@${aws_db_instance.main.address}:${aws_db_instance.main.port}/${aws_db_instance.main.db_name}"
 }

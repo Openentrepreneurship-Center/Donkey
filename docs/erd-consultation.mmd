@@ -1,0 +1,37 @@
+erDiagram
+    consultation ||--o| consultation_log : "1:1"
+    consultation ||--o| consultation_summary : "1:1"
+
+    consultation {
+        bigint_unsigned id PK
+        varchar_36 job_id UK "NOT NULL"
+        varchar_2048 file_url "NOT NULL"
+        varchar_20 status "NOT NULL"
+        datetime_6 created_at "NOT NULL"
+        datetime_6 updated_at "NOT NULL"
+    }
+
+    consultation_log {
+        bigint_unsigned id PK
+        bigint_unsigned consultation_id FK "UNIQUE, NOT NULL"
+        datetime_6 request_timestamp "NOT NULL"
+        datetime_6 completed_at
+        int_unsigned processing_time_ms
+        double audio_duration_sec
+        json stages
+        json quality
+        json model_usage
+        json error
+    }
+
+    consultation_summary {
+        bigint_unsigned id PK
+        bigint_unsigned consultation_id FK "UNIQUE, NOT NULL"
+        varchar_512 title
+        text simple_summary
+        json doctor_notes "의사 소견"
+        json test_results "검사 결과"
+        json symptom_record "증상 기록"
+        json prescription_and_care "처방 및 관리"
+        json conversation_content "대화 내용"
+    }

@@ -58,9 +58,10 @@ Donkey 서비스의 **인프라 구성 환경**을 설명하는 문서입니다.
 
 ### 스토리지
 
-| 구성 요소 | 식별자               | 설명                                                                            |
-| --------- | -------------------- | ------------------------------------------------------------------------------- |
-| S3        | donkey-logs-{계정ID} | 작업 로그 저장. 서버 측 암호화(AES256). 30일 후 STANDARD_IA 전환, 90일 후 삭제. |
+| 구성 요소 | 식별자               | 설명                                                                                            |
+| --------- | -------------------- | ----------------------------------------------------------------------------------------------- |
+| S3        | donkey-logs-{계정ID} | 작업 로그 저장. 서버 측 암호화(AES256). 30일 후 STANDARD_IA 전환, 90일 후 삭제.                 |
+| RDS MySQL | donkey-mysql         | db.t4g.micro, MySQL 8.0. 진료/로그/요약 저장. DATABASE_URL은 SSM `/donkey/DATABASE_URL`에 저장. |
 
 ### 보안·접근
 
@@ -130,3 +131,12 @@ Route 53 A 레코드가 **원래 EIP**를 가리키도록 맞춰집니다.
 - 그 인스턴스에 붙었던 **Elastic IP** 해제(Release)
 
 이렇게 하면 donkey.ai.kr 은 **원래 쓰던 인스턴스**의 8000 포트로 연결됩니다.
+
+---
+
+## RDS 및 배포 시 DATABASE_URL
+
+- Terraform 적용 시 **RDS MySQL**(db.t4g.micro)이 생성되고, 연결 URL이 **SSM Parameter Store** (`/donkey/DATABASE_URL`, SecureString)에 저장됩니다.
+- **GitHub Actions 배포** 시 해당 파라미터를 읽어 EC2의 `.env`에 `DATABASE_URL`을 넣습니다.
+- 배포에 사용하는 **AWS 자격 증명**(GitHub Secrets의 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`)에 **SSM GetParameter** 권한이 있어야 합니다.  
+  예: `ssm:GetParameter` on `arn:aws:ssm:ap-northeast-2:*:parameter/donkey/DATABASE_URL`

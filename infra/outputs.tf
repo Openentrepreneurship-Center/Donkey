@@ -50,3 +50,14 @@ output "github_secrets" {
     S3_LOGS_BUCKET = aws_s3_bucket.logs.bucket
   }
 }
+
+# RDS
+output "rds_endpoint" {
+  description = "RDS instance endpoint (host:port)"
+  value       = "${aws_db_instance.main.address}:${aws_db_instance.main.port}"
+}
+
+output "rds_ssm_parameter_name" {
+  description = "SSM parameter name for DATABASE_URL (used by deploy workflow)"
+  value       = aws_ssm_parameter.database_url.name
+}

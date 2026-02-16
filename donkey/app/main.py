@@ -27,12 +27,18 @@ from app.schemas.error import (
 )
 from app.config import get_settings
 from app.store.redis import close_all_redis_clients
+from app.db import init_db, is_db_configured
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.job_semaphore = asyncio.Semaphore(settings.max_concurrent_jobs)
+    if is_db_configured():
+        try:
+            await init_db()
+        except Exception as e:
+            _app_logger.warning("DB init (create tables) skipped: %s", e)
     yield
     try:
         await close_all_redis_clients()

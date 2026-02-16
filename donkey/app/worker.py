@@ -1,3 +1,4 @@
+import logging
 import tempfile
 import time
 import traceback
@@ -5,6 +6,8 @@ from pathlib import Path
 
 from app.config import get_settings, get_processing_timeout_seconds
 from app.store.redis import get_job_store
+
+logger = logging.getLogger(__name__)
 from app.services.audio import (
     download_audio,
     ensure_wav_16k_mono,
@@ -30,6 +33,25 @@ from app.services.job_logger import JobLogger
 TIMEOUT_ERROR_MESSAGE = "처리 시간이 제한을 초과했습니다. (오디오 길이 기준 임계시간)"
 
 
+async def _persist_consultation_if_configured(store, job_id: str, logger_instance: JobLogger) -> None:
+    """DATABASE_URL 있으면 Redis job + JobLog 기준으로 consultation/log/summary 테이블 갱신."""
+    from app.db import is_db_configured
+    if not is_db_configured():
+        return
+    try:
+        job = await store.get_job(job_id)
+        if not job:
+            return
+        from app.db.session import get_session
+        from app.db.repository import persist_consultation_from_job
+        async with get_session() as session:
+            await persist_consultation_from_job(
+                session, job_id, job, logger_instance.log.to_dict()
+            )
+    except Exception as e:
+        logger.warning("DB persist failed (job_id=%s): %s", job_id, e)
+
+
 async def _check_timeout_and_abort(
     store, job_id: str, start_time: float, timeout_sec: int, logger: JobLogger
 ) -> bool:
@@ -52,6 +74,7 @@ async def _check_timeout_and_abort(
         "screeningReason": "해당되는 내용 없음.",
         "screening": {"names": [], "phones": []},
     })
+    await _persist_consultation_if_configured(store, job_id, logger)
     return True
 
 
@@ -78,6 +101,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
     try:
         start_time = time.time()
         await store.update_job(job_id, {"status": "processing"})
+        await _persist_consultation_if_configured(store, job_id, logger)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
@@ -163,6 +187,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "consultationSummary": None,
                 })
                 logger.complete("completed")
+                await _persist_consultation_if_configured(store, job_id, logger)
                 await logger.save_to_s3()
                 return
 
@@ -223,6 +248,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "consultationSummary": None,
                 })
                 logger.complete("completed")
+                await _persist_consultation_if_configured(store, job_id, logger)
                 await logger.save_to_s3()
                 return
 
@@ -258,6 +284,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "consultationSummary": None,
                 })
                 logger.complete("completed")
+                await _persist_consultation_if_configured(store, job_id, logger)
                 await logger.save_to_s3()
                 return
 
@@ -308,8 +335,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 "simpleSummary": simple_summary,
                 "consultationSummary": consultation_summary.model_dump(),
             })
-
             logger.complete("completed")
+            await _persist_consultation_if_configured(store, job_id, logger)
 
     except Exception as e:
         error_msg = f"처리 중 오류 발생: {str(e)}"
@@ -332,6 +359,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             "screeningReason": "해당되는 내용 없음.",
             "screening": {"names": [], "phones": []},
         })
+        await _persist_consultation_if_configured(store, job_id, logger)
 
     finally:
         # 9. Save log to S3

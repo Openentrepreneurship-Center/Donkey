@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # MySQL (비우면 진료/로그/요약 DB 저장 안 함)
+    database_url: str = Field(
+        default="",
+        validation_alias="DATABASE_URL",
+        description="Async MySQL URL, e.g. mysql+asyncmy://user:pass@host:3306/dbname",
+    )
+
     # S3 Logging (비우면 Job 로그/오디오 S3 저장 안 함)
     s3_logs_bucket: str = Field(default="", validation_alias="S3_LOGS_BUCKET")
     s3_logs_prefix: str = Field(default="job-logs", validation_alias="S3_LOGS_PREFIX")

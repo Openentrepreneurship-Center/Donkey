@@ -28,11 +28,12 @@ uv sync
 
 `donkey/.env` 파일을 만들고 아래 값을 설정합니다.
 
-| 변수             | 필수   | 설명                                                                               |
-| ---------------- | ------ | ---------------------------------------------------------------------------------- |
-| `OPENAI_API_KEY` | ✅     | OpenAI API 키 (전사·요약·화자 라벨링에 사용)                                       |
-| `API_KEY`        | (선택) | API 인증용 키. 없으면 `default-api-key` 사용. 요청 시 `X-Api-Key` 헤더에 넣습니다. |
-| `REDIS_URL`      | (선택) | Redis URL. 기본값: `redis://localhost:6379/0`                                      |
+| 변수             | 필수   | 설명                                                                                                    |
+| ---------------- | ------ | ------------------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY` | ✅     | OpenAI API 키 (전사·요약·화자 라벨링에 사용)                                                            |
+| `API_KEY`        | (선택) | API 인증용 키. 없으면 `default-api-key` 사용. 요청 시 `X-Api-Key` 헤더에 넣습니다.                      |
+| `REDIS_URL`      | (선택) | Redis URL. 기본값: `redis://localhost:6379/0`                                                           |
+| `DATABASE_URL`   | (선택) | MySQL URL (진료/로그/요약 저장). 비우면 DB 저장 안 함. 예: `mysql+asyncmy://user:pass@host:3306/dbname` |
 
 추가 옵션은 `donkey/.env.example` 참고.
 
