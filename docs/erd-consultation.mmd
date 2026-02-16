@@ -6,6 +6,7 @@ erDiagram
         bigint_unsigned id PK
         varchar_36 job_id UK "NOT NULL"
         varchar_2048 file_url "NOT NULL"
+        varchar_2048 stored_audio_url "NULL, S3 저장 오디오 URL"
         varchar_20 status "NOT NULL"
         datetime_6 created_at "NOT NULL"
         datetime_6 updated_at "NOT NULL"

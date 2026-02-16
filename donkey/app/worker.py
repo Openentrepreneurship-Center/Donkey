@@ -132,10 +132,21 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 return
 
             # 변환된 오디오를 S3 audio-data 폴더에 업로드 (설정 시)
+            s3_audio_url = None
             try:
-                upload_audio_to_s3(wav_path, job_id)
+                s3_audio_url = upload_audio_to_s3(wav_path, job_id)
             except Exception:
                 pass
+            if s3_audio_url:
+                from app.db import is_db_configured
+                if is_db_configured():
+                    try:
+                        from app.db.session import get_session
+                        from app.db.repository import update_consultation_stored_audio_url
+                        async with get_session() as session:
+                            await update_consultation_stored_audio_url(session, job_id, s3_audio_url)
+                    except Exception as e:
+                        logger.warning("DB stored_audio_url update failed (job_id=%s): %s", job_id, e)
 
             diarized_lines: list[str]
             unique_speakers: set[str]

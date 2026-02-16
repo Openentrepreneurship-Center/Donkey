@@ -37,6 +37,21 @@ async def update_consultation_status(session: AsyncSession, consultation_id: int
     )
 
 
+async def update_consultation_stored_audio_url(
+    session: AsyncSession, job_id: str, stored_audio_url: str
+) -> None:
+    """S3에 저장한 오디오 파일 URL을 consultation에 반영."""
+    consultation_id = await get_consultation_id_by_job_id(session, job_id)
+    if consultation_id is None:
+        return
+    now = datetime.now(timezone.utc)
+    await session.execute(
+        update(Consultation)
+        .where(Consultation.id == consultation_id)
+        .values(stored_audio_url=stored_audio_url, updated_at=now)
+    )
+
+
 async def get_consultation_id_by_job_id(session: AsyncSession, job_id: str) -> int | None:
     r = await session.execute(select(Consultation.id).where(Consultation.job_id == job_id))
     row = r.scalar_one_or_none()

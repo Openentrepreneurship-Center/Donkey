@@ -16,6 +16,7 @@ class Consultation(Base):
     id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
     job_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
     file_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    stored_audio_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -51,21 +51,22 @@ def extract_segment(audio: AudioSegment, start_sec: float, end_sec: float) -> Au
     return audio[int(start_sec * 1000):int(end_sec * 1000)]
 
 
-def upload_audio_to_s3(wav_path: str | Path, job_id: str) -> bool:
+def upload_audio_to_s3(wav_path: str | Path, job_id: str) -> str | None:
     """
     변환된 WAV 파일을 S3 버킷의 audio-data(또는 s3_audio_prefix) 폴더에 업로드.
     s3_logs_bucket이 없거나 save_audio_to_s3=False면 스킵.
+    성공 시 저장된 파일의 HTTPS URL 반환, 실패 시 None.
     """
     settings = get_settings()
     if not settings.s3_logs_bucket or not settings.save_audio_to_s3:
-        return False
+        return None
     try:
         import boto3
         from botocore.exceptions import ClientError
 
         path = Path(wav_path)
         if not path.exists():
-            return False
+            return None
         client = boto3.client("s3", region_name=settings.aws_region)
         date_prefix = datetime.now(timezone.utc).strftime("%Y/%m/%d")
         key = f"{settings.s3_audio_prefix.rstrip('/')}/{date_prefix}/{job_id}.wav"
@@ -76,6 +77,7 @@ def upload_audio_to_s3(wav_path: str | Path, job_id: str) -> bool:
                 Body=f,
                 ContentType="audio/wav",
             )
-        return True
+        url = f"https://{settings.s3_logs_bucket}.s3.{settings.aws_region}.amazonaws.com/{key}"
+        return url
     except (ClientError, Exception):
-        return False
+        return None
