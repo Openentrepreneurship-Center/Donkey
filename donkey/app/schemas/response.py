@@ -7,11 +7,6 @@ class ConversationItem(BaseModel):
     content: str = Field(..., description="발화 내용")
 
 
-class Screening(BaseModel):
-    names: list[str] = Field(default_factory=list, description="스크리닝된 이름 목록 (예: [홍길동])")
-    phones: list[str] = Field(default_factory=list, description="스크리닝된 전화번호 목록")
-
-
 class ConsultationSummary(BaseModel):
     doctorNotes: list[str] = Field(default_factory=list, description="의사 소견")
     testResults: list[str] = Field(default_factory=list, description="검사 결과")
@@ -27,9 +22,6 @@ class AIResultBody(BaseModel):
     isGenerated: bool = Field(..., description="생성 완료 여부")
     isAbusing: bool = Field(..., description="부적절한 콘텐츠 여부")
     abusingReason: str = Field(..., description="부적절 판정 사유")
-    isScreening: bool = Field(..., description="스크리닝된 항목 존재 여부")
-    screeningReason: str = Field(..., description="스크리닝 사유 (해당되는 내용 발견/없음)")
-    screening: Screening = Field(..., description="스크리닝된 이름·전화번호 목록")
     simpleSummary: str = Field(..., description="간단 요약")
     consultationSummary: ConsultationSummary | None = Field(None, description="진료 요약 (S→symptomRecord, O→testResults, A→doctorNotes, P→prescriptionAndCare)")
 

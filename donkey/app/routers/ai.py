@@ -19,7 +19,6 @@ from app.schemas.response import (
     AIResponse,
     AIResultBody,
     ConsultationSummary,
-    Screening,
 )
 from app.schemas.error import ERROR_404, ERROR_500, error_response
 from app.store.redis import (
@@ -169,10 +168,6 @@ async def get_ai_result(
     if job.get("consultationSummary"):
         consultation_summary = ConsultationSummary(**job["consultationSummary"])
 
-    # Build screening (default when not yet set)
-    screening_data = job.get("screening") or {"names": [], "phones": []}
-    screening = Screening(**screening_data)
-
     result_body = AIResultBody(
         id=job_id,
         title=job.get("title", ""),
@@ -180,9 +175,6 @@ async def get_ai_result(
         isGenerated=is_generated,
         isAbusing=job.get("isAbusing", False),
         abusingReason=job.get("abusingReason", ""),
-        isScreening=job.get("isScreening", False),
-        screeningReason=job.get("screeningReason", "해당되는 내용 없음."),
-        screening=screening,
         simpleSummary=job.get("simpleSummary", ""),
         consultationSummary=consultation_summary,
     )
