@@ -213,7 +213,7 @@ def parse_soap_to_consultation_summary(
             speaker = match.group(1)
             content = _strip_question_prefix(match.group(2))
             # SPEAKER_00=의사, SPEAKER_01=환자 (정확히 00만 의사로, 01은 환자)
-            role = "doctor" if speaker == "SPEAKER_00" else "patient"
+            role = "원장님" if speaker == "SPEAKER_00" else "환자"
             conversation_content.append(ConversationItem(
                 role=role,
                 index=idx,

@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 
 class ConversationItem(BaseModel):
-    role: str = Field(..., description="발화자 역할 (의사/환자)")
+    role: str = Field(..., description="발화자 역할 (원장님/환자)")
     index: int = Field(..., description="대화 순서 인덱스")
     content: str = Field(..., description="발화 내용")
 
