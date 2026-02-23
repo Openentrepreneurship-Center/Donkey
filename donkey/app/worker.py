@@ -32,6 +32,9 @@ from app.services.job_logger import JobLogger
 # 음성 길이 기준 처리 임계 초과 시 오류 메시지
 TIMEOUT_ERROR_MESSAGE = "처리 시간이 제한을 초과했습니다. (오디오 길이 기준 임계시간)"
 
+# 클라이언트에 노출할 공통 메시지 (세부 예외는 로그/DB에만)
+CLIENT_ERROR_MESSAGE = "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+
 
 async def _persist_consultation_if_configured(store, job_id: str, logger_instance: JobLogger) -> None:
     """DATABASE_URL 있으면 Redis job + JobLog 기준으로 consultation/log/summary 테이블 갱신."""
@@ -350,7 +353,6 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             await _persist_consultation_if_configured(store, job_id, logger)
 
     except Exception as e:
-        error_msg = f"처리 중 오류 발생: {str(e)}"
         traceback.print_exc()
 
         logger.set_error(
@@ -362,7 +364,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
 
         await store.update_job(job_id, {
             "status": "error",
-            "error": error_msg,
+            "error": CLIENT_ERROR_MESSAGE,
             "isGenerated": False,
             "isAbusing": False,
             "abusingReason": "",
