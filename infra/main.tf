@@ -238,9 +238,9 @@ resource "aws_instance" "main" {
     Environment = "dev"
   }
 
-  # 기존 인스턴스 import 시 설정 차이로 교체되지 않도록
+  # 기존 인스턴스 import 시 설정 차이로 교체되지 않도록 (instance_type 제외하여 Terraform으로 변경 가능)
   lifecycle {
-    ignore_changes = [ami, instance_type, user_data, root_block_device]
+    ignore_changes = [ami, user_data, root_block_device]
   }
 }
 
