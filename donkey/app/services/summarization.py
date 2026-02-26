@@ -22,7 +22,10 @@ def generate_soap_summary(diarized_text: str, chat_model: str = "gpt-4o-mini") -
         "You are a clinical documentation assistant. "
         "Summarize the provided Korean medical conversation into SOAP format. "
         "Be factual, do not invent details. If unclear, say '불명확/언급 없음'. "
-        "Write in Korean. Use concise bullet points. "
+        "Write in Korean. "
+        "Use a consistent tone: write each bullet as a complete sentence in reported-speech or documentation style (e.g. '~했다고 했습니다', '~라고 했습니다', '~입니다'). "
+        "Do not use telegraphic fragments (e.g. avoid '증상 개선 중' alone; write '환자는 증상이 개선되고 있다고 했습니다' or similar). "
+        "For medical terms, use 한글(English) when appropriate (e.g. 혈당(Blood sugar), 비타민 D(Vitamin D)). "
         "Do not include any personal identifiers beyond what is present in the transcript."
     )
 
@@ -33,10 +36,10 @@ SOAP(Subjective, Objective, Assessment, Plan) 형식으로 요약해줘.
 - 한국어
 - 반드시 섹션 제목을 한 줄에 쓴 뒤, 그 다음 줄부터 해당 섹션 내용을 적어줘.
   섹션 제목: Subjective (또는 S), Objective (또는 O), Assessment (또는 A), Plan (또는 P)
-- 각 섹션 내용은 불릿(- 또는 •)으로 시작하는 문장으로 간결하게 나열
+- 각 섹션 내용은 불릿(- 또는 •)으로 시작하는 문장으로 나열. 문장 톤: "~했다고 했습니다", "~라고 했습니다", "~입니다" 같은 전달형/기록형으로 한 문장씩 완결되게 쓸 것. (단순 단어 나열이나 생략형 금지)
 - 전사에 없는 내용은 절대 추가하지 말 것(추측 금지)
 - 모호하면 "불명확" 또는 "언급 없음"으로 표시
-- 진료 핵심(증상/병력/검사/설명/진단 추정/계획)을 우선
+- 진료 핵심(증상/병력/검사/설명/진단 추정/계획)을 우선. 의학 용어는 필요 시 한글(English)로 표기
 - 질문 문장 앞에 Q. 등 접두사 붙이지 말 것
 
 [전사]
