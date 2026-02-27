@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 import logging
 import uuid
-from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -27,13 +26,6 @@ from app.store.redis import (
     set_idempotency_mapping_nx,
 )
 from app.worker import process_audio_job
-from app.db import is_db_configured
-from app.db.session import get_session
-from app.db.repository import (
-    create_consultation,
-    create_consultation_log,
-    create_consultation_summary,
-)
 
 
 def _run_worker_sync(job_id: str, file_url: str) -> None:
@@ -98,18 +90,7 @@ async def create_ai_job(
 
     store = await get_job_store()
 
-    # MySQL: consultation / log / summary 행 생성 (DATABASE_URL 있을 때만)
-    if is_db_configured():
-        try:
-            async with get_session() as session:
-                consultation_id = await create_consultation(session, job_id, file_url)
-                await create_consultation_log(
-                    session, consultation_id, datetime.now(timezone.utc)
-                )
-                await create_consultation_summary(session, consultation_id)
-        except Exception as e:
-            logger.warning("DB consultation create failed (job_id=%s): %s", job_id, e)
-
+    # DB 저장은 워커에서 수행(응답 지연 없음, 이벤트 루프 분리 이슈 없음)
     # Initialize job in Redis
     await store.create_job(job_id, {
         "id": job_id,

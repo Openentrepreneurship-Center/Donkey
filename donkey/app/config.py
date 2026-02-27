@@ -68,7 +68,7 @@ class Settings(BaseSettings):
 
     # 동시 처리 job 수 (이 수만큼 동시에 전사·요약 처리)
     max_concurrent_jobs: int = Field(
-        default=3,
+        default=5,
         validation_alias="MAX_CONCURRENT_JOBS",
     )
 

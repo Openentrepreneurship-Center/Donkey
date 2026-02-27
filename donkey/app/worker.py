@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import tempfile
 import time
@@ -8,6 +9,9 @@ from app.config import get_settings, get_processing_timeout_seconds
 from app.store.redis import get_job_store
 
 logger = logging.getLogger(__name__)
+
+_DB_RETRY_COUNT = 3
+_DB_RETRY_DELAY = 2  # seconds
 from app.services.audio import (
     download_audio,
     ensure_wav_16k_mono,
@@ -36,23 +40,38 @@ TIMEOUT_ERROR_MESSAGE = "처리 시간이 제한을 초과했습니다. (오디�
 CLIENT_ERROR_MESSAGE = "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
 
 
-async def _persist_consultation_if_configured(store, job_id: str, logger_instance: JobLogger) -> None:
-    """DATABASE_URL 있으면 Redis job + JobLog 기준으로 consultation/log/summary 테이블 갱신."""
+async def _persist_consultation_if_configured(
+    store,
+    job_id: str,
+    logger_instance: JobLogger,
+    *,
+    stored_audio_url: str | None = None,
+) -> None:
+    """DATABASE_URL 있으면 Redis job + JobLog 기준으로 consultation/log/summary 테이블 갱신. 실패 시 재시도."""
     from app.db import is_db_configured
     if not is_db_configured():
         return
-    try:
-        job = await store.get_job(job_id)
-        if not job:
+    from app.db.session import get_session
+    from app.db.repository import persist_consultation_from_job
+    for attempt in range(1, _DB_RETRY_COUNT + 1):
+        try:
+            job = await store.get_job(job_id)
+            if not job:
+                return
+            async with get_session() as session:
+                await persist_consultation_from_job(
+                    session, job_id, job, logger_instance.log.to_dict(),
+                    stored_audio_url=stored_audio_url,
+                )
             return
-        from app.db.session import get_session
-        from app.db.repository import persist_consultation_from_job
-        async with get_session() as session:
-            await persist_consultation_from_job(
-                session, job_id, job, logger_instance.log.to_dict()
+        except Exception as e:
+            logger.warning(
+                "DB persist failed (job_id=%s, attempt %d/%d): %s",
+                job_id, attempt, _DB_RETRY_COUNT, e,
             )
-    except Exception as e:
-        logger.warning("DB persist failed (job_id=%s): %s", job_id, e)
+            if attempt < _DB_RETRY_COUNT:
+                await asyncio.sleep(_DB_RETRY_DELAY * attempt)
+    logger.error("DB persist exhausted retries (job_id=%s)", job_id)
 
 
 async def _check_timeout_and_abort(
@@ -104,7 +123,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
     try:
         start_time = time.time()
         await store.update_job(job_id, {"status": "processing"})
-        await _persist_consultation_if_configured(store, job_id, logger)
+
+        # DB 저장은 마지막 _persist_consultation_if_configured에서 한 번에 (없으면 생성 + 데이터 채움)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
@@ -134,22 +154,12 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return
 
-            # 변환된 오디오를 S3 audio-data 폴더에 업로드 (설정 시)
+            # 변환된 오디오를 S3 audio-data 폴더에 업로드 (설정 시). DB 반영은 persist 이후에.
             s3_audio_url = None
             try:
                 s3_audio_url = upload_audio_to_s3(wav_path, job_id)
             except Exception:
                 pass
-            if s3_audio_url:
-                from app.db import is_db_configured
-                if is_db_configured():
-                    try:
-                        from app.db.session import get_session
-                        from app.db.repository import update_consultation_stored_audio_url
-                        async with get_session() as session:
-                            await update_consultation_stored_audio_url(session, job_id, s3_audio_url)
-                    except Exception as e:
-                        logger.warning("DB stored_audio_url update failed (job_id=%s): %s", job_id, e)
 
             diarized_lines: list[str]
             unique_speakers: set[str]
@@ -201,7 +211,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "consultationSummary": None,
                 })
                 logger.complete("completed")
-                await _persist_consultation_if_configured(store, job_id, logger)
+                await _persist_consultation_if_configured(store, job_id, logger, stored_audio_url=s3_audio_url)
                 await logger.save_to_s3()
                 return
 
@@ -262,7 +272,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "consultationSummary": None,
                 })
                 logger.complete("completed")
-                await _persist_consultation_if_configured(store, job_id, logger)
+                await _persist_consultation_if_configured(store, job_id, logger, stored_audio_url=s3_audio_url)
                 await logger.save_to_s3()
                 return
 
@@ -298,7 +308,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "consultationSummary": None,
                 })
                 logger.complete("completed")
-                await _persist_consultation_if_configured(store, job_id, logger)
+                await _persist_consultation_if_configured(store, job_id, logger, stored_audio_url=s3_audio_url)
                 await logger.save_to_s3()
                 return
 
@@ -350,7 +360,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 "consultationSummary": consultation_summary.model_dump(),
             })
             logger.complete("completed")
-            await _persist_consultation_if_configured(store, job_id, logger)
+            await _persist_consultation_if_configured(store, job_id, logger, stored_audio_url=s3_audio_url)
 
     except Exception as e:
         traceback.print_exc()
@@ -372,7 +382,10 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             "screeningReason": "해당되는 내용 없음.",
             "screening": {"names": [], "phones": []},
         })
-        await _persist_consultation_if_configured(store, job_id, logger)
+        await _persist_consultation_if_configured(
+            store, job_id, logger,
+            stored_audio_url=locals().get("s3_audio_url"),
+        )
 
     finally:
         # 9. Save log to S3

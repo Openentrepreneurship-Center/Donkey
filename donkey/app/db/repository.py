@@ -58,6 +58,7 @@ async def get_consultation_id_by_job_id(session: AsyncSession, job_id: str) -> i
     return int(row) if row is not None else None
 
 
+
 async def create_consultation_log(
     session: AsyncSession,
     consultation_id: int,
@@ -187,14 +188,23 @@ async def persist_consultation_from_job(
     job_id: str,
     job: dict[str, Any],
     job_log_dict: dict[str, Any],
+    *,
+    stored_audio_url: str | None = None,
 ) -> None:
     """
-    Redis job + JobLog dict 기준으로 consultation / log / summary 테이블 갱신.
-    consultation_id가 없으면(해당 job_id로 생성된 적 없으면) no-op.
+    Redis job + JobLog dict 기준으로 consultation / log / summary 저장.
+    consultation이 없으면 생성 후 데이터 채움, 있으면 갱신만.
     """
     consultation_id = await get_consultation_id_by_job_id(session, job_id)
+    file_url = job.get("file_url", "")
+
     if consultation_id is None:
-        return
+        consultation_id = await create_consultation(session, job_id, file_url)
+        await create_consultation_log(
+            session, consultation_id, _parse_iso(job_log_dict.get("request_timestamp")) or datetime.now(timezone.utc),
+        )
+        await create_consultation_summary(session, consultation_id)
+
     status = job.get("status", "pending")
     await update_consultation_status(session, consultation_id, status)
     log_vals = _job_log_to_log_update(job_log_dict)
@@ -202,3 +212,10 @@ async def persist_consultation_from_job(
     if status == "completed" and job.get("consultationSummary"):
         summary_vals = _job_to_summary_update(job)
         await update_consultation_summary(session, consultation_id, **summary_vals)
+    if stored_audio_url:
+        now = datetime.now(timezone.utc)
+        await session.execute(
+            update(Consultation)
+            .where(Consultation.id == consultation_id)
+            .values(stored_audio_url=stored_audio_url, updated_at=now)
+        )
