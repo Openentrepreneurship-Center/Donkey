@@ -1,9 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, Double, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+KST = timezone(timedelta(hours=9))
 
 
 class Base(DeclarativeBase):
@@ -18,8 +20,8 @@ class Consultation(Base):
     file_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     stored_audio_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST), onupdate=lambda: datetime.now(KST))
 
 
 class ConsultationLog(Base):

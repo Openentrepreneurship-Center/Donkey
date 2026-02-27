@@ -1,12 +1,14 @@
 """Consultation / log / summary CRUD. DATABASE_URL 없으면 호출하지 않음."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Consultation, ConsultationLog, ConsultationSummary
+
+KST = timezone(timedelta(hours=9))
 
 
 def _parse_iso(s: str | None) -> datetime | None:
@@ -31,7 +33,7 @@ async def create_consultation(session: AsyncSession, job_id: str, file_url: str)
 
 
 async def update_consultation_status(session: AsyncSession, consultation_id: int, status: str) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(KST)
     await session.execute(
         update(Consultation).where(Consultation.id == consultation_id).values(status=status, updated_at=now)
     )
@@ -44,7 +46,7 @@ async def update_consultation_stored_audio_url(
     consultation_id = await get_consultation_id_by_job_id(session, job_id)
     if consultation_id is None:
         return
-    now = datetime.now(timezone.utc)
+    now = datetime.now(KST)
     await session.execute(
         update(Consultation)
         .where(Consultation.id == consultation_id)
@@ -201,7 +203,7 @@ async def persist_consultation_from_job(
     if consultation_id is None:
         consultation_id = await create_consultation(session, job_id, file_url)
         await create_consultation_log(
-            session, consultation_id, _parse_iso(job_log_dict.get("request_timestamp")) or datetime.now(timezone.utc),
+            session, consultation_id, _parse_iso(job_log_dict.get("request_timestamp")) or datetime.now(KST),
         )
         await create_consultation_summary(session, consultation_id)
 
@@ -213,7 +215,7 @@ async def persist_consultation_from_job(
         summary_vals = _job_to_summary_update(job)
         await update_consultation_summary(session, consultation_id, **summary_vals)
     if stored_audio_url:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(KST)
         await session.execute(
             update(Consultation)
             .where(Consultation.id == consultation_id)

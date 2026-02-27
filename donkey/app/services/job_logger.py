@@ -1,8 +1,10 @@
 import json
 import time
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
+
+KST = timezone(timedelta(hours=9))
 
 import boto3
 from botocore.exceptions import ClientError
@@ -60,7 +62,7 @@ class JobLogger:
         self.log = JobLog(
             job_id=job_id,
             file_url=file_url,
-            request_timestamp=datetime.now(timezone.utc).isoformat(),
+            request_timestamp=datetime.now(KST).isoformat(),
         )
         self._start_time = time.time()
         self._stage_start: float | None = None
@@ -110,7 +112,7 @@ class JobLogger:
 
     def complete(self, status: str = "completed") -> None:
         self.log.status = status
-        self.log.completed_at = datetime.now(timezone.utc).isoformat()
+        self.log.completed_at = datetime.now(KST).isoformat()
         self.log.processing_time_ms = int((time.time() - self._start_time) * 1000)
 
     async def save_to_s3(self) -> bool:
@@ -122,7 +124,7 @@ class JobLogger:
         try:
             s3_client = boto3.client("s3", region_name=settings.aws_region)
 
-            date_prefix = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+            date_prefix = datetime.now(KST).strftime("%Y/%m/%d")
             key = f"{settings.s3_logs_prefix}/{date_prefix}/{self.log.job_id}.json"
 
             s3_client.put_object(
