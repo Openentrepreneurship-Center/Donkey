@@ -3,7 +3,7 @@
 from datetime import date, datetime, timezone, timedelta
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -743,6 +743,12 @@ async def update_inquiry_status(
         "status": row[1],
         "updated_at": row[2].isoformat() if row[2] else None,
     }
+
+
+async def delete_inquiry(session: AsyncSession, inquiry_id: int) -> bool:
+    """문의 삭제. inquiry_reply는 CASCADE. 반환: 삭제됐으면 True, 없었으면 False."""
+    result = await session.execute(delete(Inquiry).where(Inquiry.id == inquiry_id))
+    return result.rowcount > 0
 
 
 async def create_inquiry_reply(

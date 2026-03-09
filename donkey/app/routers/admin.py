@@ -11,6 +11,7 @@ from app.db import is_db_configured
 from app.db.repository import (
     create_inquiry,
     create_inquiry_reply,
+    delete_inquiry,
     get_admin_user_by_user_id,
     get_dashboard_stats,
     get_distinct_projects,
@@ -334,6 +335,23 @@ async def patch_inquiry_status(
     if result is None:
         raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 문의를 찾을 수 없습니다."))
     return result
+
+
+@router.delete("/inquiries/{inquiry_id}", status_code=204)
+async def delete_inquiry_endpoint(
+    inquiry_id: int,
+    admin=Depends(get_current_admin),
+):
+    """문의 삭제."""
+    if not is_db_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=error_response("SERVICE_UNAVAILABLE", "DB 연결이 필요합니다."),
+        )
+    async with get_session() as session:
+        deleted = await delete_inquiry(session, inquiry_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 문의를 찾을 수 없습니다."))
 
 
 @router.post("/inquiries/{inquiry_id}/replies")
