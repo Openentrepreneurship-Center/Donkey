@@ -11,6 +11,7 @@ from app.db import is_db_configured
 from app.db.repository import (
     get_admin_user_by_user_id,
     get_dashboard_stats,
+    get_distinct_project_ids,
     get_errors_by_period,
     get_request_detail_by_job_id,
     get_requests_list,
@@ -73,6 +74,22 @@ async def get_current_admin(
     return admin
 
 
+@router.get("/projects")
+async def list_projects(admin=Depends(get_current_admin)):
+    """request 테이블에서 고유 project_id 목록 조회."""
+    if not is_db_configured():
+        return {"items": []}
+    try:
+        async with get_session() as session:
+            ids = await get_distinct_project_ids(session, admin.client_id)
+        return {"items": ids}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=error_response("COMMON_500_000", f"프로젝트 목록 조회 중 오류: {e!s}"),
+        )
+
+
 @router.get("/me")
 async def me(admin=Depends(get_current_admin)):
     return {"user_id": admin.user_id, "display_name": admin.display_name}
@@ -85,7 +102,10 @@ async def refresh(admin=Depends(get_current_admin)):
 
 
 @router.get("/dashboard")
-async def dashboard(admin=Depends(get_current_admin)):
+async def dashboard(
+    admin=Depends(get_current_admin),
+    project_id: int | None = None,
+):
     if not is_db_configured():
         return {
             "today_count": 0,
@@ -104,7 +124,7 @@ async def dashboard(admin=Depends(get_current_admin)):
         }
     try:
         async with get_session() as session:
-            return await get_dashboard_stats(session, admin.client_id)
+            return await get_dashboard_stats(session, admin.client_id, project_id)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -117,6 +137,7 @@ async def usage(
     admin=Depends(get_current_admin),
     from_date: str | None = None,
     to_date: str | None = None,
+    project_id: int | None = None,
 ):
     if not is_db_configured():
         return {
@@ -139,7 +160,7 @@ async def usage(
         to_d = from_d + timedelta(days=90)
     try:
         async with get_session() as session:
-            return await get_usage_by_period(session, from_d, to_d, admin.client_id)
+            return await get_usage_by_period(session, from_d, to_d, admin.client_id, project_id)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -154,6 +175,7 @@ async def list_requests(
     limit: int = 50,
     title: str | None = None,
     status: str | None = None,
+    project_id: int | None = None,
 ):
     if not is_db_configured():
         return {"items": [], "total": 0}
@@ -170,6 +192,7 @@ async def list_requests(
                 title_query=title_query,
                 status_filter=status_filter,
                 client_id=admin.client_id,
+                project_id=project_id,
             )
         return {"items": items, "total": total}
     except Exception as e:
@@ -199,6 +222,7 @@ async def get_request_detail(job_id: str, admin=Depends(get_current_admin)):
 async def list_errors(
     admin=Depends(get_current_admin),
     period: str = "week",
+    project_id: int | None = None,
 ):
     if not is_db_configured():
         return {"items": []}
@@ -207,7 +231,7 @@ async def list_errors(
         period = "week"
     try:
         async with get_session() as session:
-            items = await get_errors_by_period(session, period, admin.client_id)
+            items = await get_errors_by_period(session, period, admin.client_id, project_id)
         return {"items": items}
     except Exception as e:
         raise HTTPException(

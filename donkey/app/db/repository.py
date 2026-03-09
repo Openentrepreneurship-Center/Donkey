@@ -260,12 +260,27 @@ async def get_api_key_context_by_hash(
 # Admin
 # ---------------------------------------------------------------------------
 
+async def get_distinct_project_ids(
+    session: AsyncSession, client_id: int | None = None
+) -> list[int]:
+    """request 테이블에서 고유 project_id 목록 조회. client_id 있으면 해당 클라이언트로 필터."""
+    q = select(Request.project_id).distinct().where(Request.project_id.isnot(None))
+    if client_id is not None:
+        q = q.where(Request.client_id == client_id)
+    rows = (await session.execute(q.order_by(Request.project_id))).all()
+    return [r[0] for r in rows]
+
+
 async def get_admin_user_by_user_id(session: AsyncSession, user_id: str) -> AdminUser | None:
     r = await session.execute(select(AdminUser).where(AdminUser.user_id == user_id))
     return r.scalar_one_or_none()
 
 
-async def get_dashboard_stats(session: AsyncSession, client_id: int | None = None) -> dict:
+async def get_dashboard_stats(
+    session: AsyncSession,
+    client_id: int | None = None,
+    project_id: int | None = None,
+) -> dict:
     """대시보드 통계. API_SPEC 준수."""
     now = datetime.now(KST)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -276,6 +291,8 @@ async def get_dashboard_stats(session: AsyncSession, client_id: int | None = Non
     base_filter: list = []
     if client_id is not None:
         base_filter.append(Request.client_id == client_id)
+    if project_id is not None:
+        base_filter.append(Request.project_id == project_id)
 
     async def _count_since(since: datetime) -> int:
         q = select(func.count()).select_from(Request).where(Request.created_at >= since)
@@ -347,13 +364,19 @@ async def get_dashboard_stats(session: AsyncSession, client_id: int | None = Non
 
 
 async def get_usage_by_period(
-    session: AsyncSession, from_d: date, to_d: date, client_id: int | None = None
+    session: AsyncSession,
+    from_d: date,
+    to_d: date,
+    client_id: int | None = None,
+    project_id: int | None = None,
 ) -> dict:
     from_dt = datetime.combine(from_d, datetime.min.time()).replace(tzinfo=KST)
     to_dt = datetime.combine(to_d + timedelta(days=1), datetime.min.time()).replace(tzinfo=KST)
     base_where = [Request.created_at >= from_dt, Request.created_at < to_dt]
     if client_id is not None:
         base_where.append(Request.client_id == client_id)
+    if project_id is not None:
+        base_where.append(Request.project_id == project_id)
 
     total = (await session.execute(select(func.count()).select_from(Request).where(*base_where))).scalar() or 0
     completed = (await session.execute(
@@ -381,6 +404,8 @@ async def get_usage_by_period(
         )
         if client_id is not None:
             dq = dq.where(Request.client_id == client_id)
+        if project_id is not None:
+            dq = dq.where(Request.project_id == project_id)
         cnt = (await session.execute(dq)).scalar() or 0
         daily_counts.append({"date": cursor.isoformat(), "count": cnt})
         cursor += timedelta(days=1)
@@ -395,7 +420,10 @@ async def get_usage_by_period(
 
 
 async def get_errors_by_period(
-    session: AsyncSession, period: str, client_id: int | None = None
+    session: AsyncSession,
+    period: str,
+    client_id: int | None = None,
+    project_id: int | None = None,
 ) -> list[dict]:
     now = datetime.now(KST)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -413,6 +441,8 @@ async def get_errors_by_period(
     )
     if client_id is not None:
         q = q.where(Request.client_id == client_id)
+    if project_id is not None:
+        q = q.where(Request.project_id == project_id)
     rows = (await session.execute(q)).all()
 
     def _normalize_error(e: dict | None) -> dict:
@@ -444,6 +474,7 @@ async def get_requests_list(
     title_query: str | None = None,
     status_filter: str | None = None,
     client_id: int | None = None,
+    project_id: int | None = None,
 ) -> tuple[list[dict], int]:
     base = (
         select(
@@ -460,6 +491,9 @@ async def get_requests_list(
     if client_id is not None:
         base = base.where(Request.client_id == client_id)
         count_q = count_q.where(Request.client_id == client_id)
+    if project_id is not None:
+        base = base.where(Request.project_id == project_id)
+        count_q = count_q.where(Request.project_id == project_id)
     if status_filter:
         base = base.where(Request.status == status_filter)
         count_q = count_q.where(Request.status == status_filter)
@@ -473,6 +507,8 @@ async def get_requests_list(
         )
         if client_id is not None:
             count_q = count_q.where(Request.client_id == client_id)
+        if project_id is not None:
+            count_q = count_q.where(Request.project_id == project_id)
         if status_filter:
             count_q = count_q.where(Request.status == status_filter)
 
