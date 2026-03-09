@@ -11,7 +11,7 @@ from app.db import is_db_configured
 from app.db.repository import (
     get_admin_user_by_user_id,
     get_dashboard_stats,
-    get_distinct_project_ids,
+    get_distinct_projects,
     get_errors_by_period,
     get_request_detail_by_job_id,
     get_requests_list,
@@ -76,13 +76,13 @@ async def get_current_admin(
 
 @router.get("/projects")
 async def list_projects(admin=Depends(get_current_admin)):
-    """request 테이블에서 고유 project_id 목록 조회."""
+    """request 테이블에서 고유 project 목록 조회 (id, name)."""
     if not is_db_configured():
         return {"items": []}
     try:
         async with get_session() as session:
-            ids = await get_distinct_project_ids(session, admin.client_id)
-        return {"items": ids}
+            items = await get_distinct_projects(session, admin.client_id)
+        return {"items": items}
     except Exception as e:
         raise HTTPException(
             status_code=500,

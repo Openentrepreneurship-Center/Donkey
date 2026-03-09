@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AdminUser, ApiKey, Client, Request, RequestLog, RequestSummary
+from app.db.models import AdminUser, ApiKey, Client, Project, Request, RequestLog, RequestSummary
 
 KST = timezone(timedelta(hours=9))
 
@@ -260,15 +260,19 @@ async def get_api_key_context_by_hash(
 # Admin
 # ---------------------------------------------------------------------------
 
-async def get_distinct_project_ids(
+async def get_distinct_projects(
     session: AsyncSession, client_id: int | None = None
-) -> list[int]:
-    """request 테이블에서 고유 project_id 목록 조회. client_id 있으면 해당 클라이언트로 필터."""
-    q = select(Request.project_id).distinct().where(Request.project_id.isnot(None))
+) -> list[dict]:
+    """request 테이블에서 고유 project 목록 조회 (id, name). client_id 있으면 해당 클라이언트로 필터."""
+    q = (
+        select(Project.id, Project.name)
+        .join(Request, Request.project_id == Project.id)
+        .distinct()
+    )
     if client_id is not None:
         q = q.where(Request.client_id == client_id)
-    rows = (await session.execute(q.order_by(Request.project_id))).all()
-    return [r[0] for r in rows]
+    rows = (await session.execute(q.order_by(Project.id))).all()
+    return [{"id": r[0], "name": r[1]} for r in rows]
 
 
 async def get_admin_user_by_user_id(session: AsyncSession, user_id: str) -> AdminUser | None:
