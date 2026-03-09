@@ -1,4 +1,4 @@
-"""MySQL DB layer for consultation / log / summary persistence."""
+"""MySQL DB layer for request / log / summary persistence."""
 
 from app.db.session import get_session, init_db, is_db_configured
 

@@ -1,0 +1,71 @@
+erDiagram
+    client ||--o{ project : "1:N"
+    client ||--o{ api_key : "1:N"
+    project ||--o{ api_key : "1:N"
+    client ||--o{ request : "1:N"
+    project ||--o{ request : "1:N"
+    request ||--o| request_log : "1:1"
+    request ||--o| request_summary : "1:1"
+
+    client {
+        bigint_unsigned id PK
+        varchar_255 name "NOT NULL"
+        datetime_6 created_at "NOT NULL"
+        datetime_6 updated_at "NOT NULL"
+    }
+
+    project {
+        bigint_unsigned id PK
+        bigint_unsigned client_id FK "NOT NULL"
+        varchar_255 name "NOT NULL"
+        datetime_6 created_at "NOT NULL"
+        datetime_6 updated_at "NOT NULL"
+    }
+
+    api_key {
+        bigint_unsigned id PK
+        bigint_unsigned client_id FK "NOT NULL"
+        bigint_unsigned project_id FK "NOT NULL"
+        varchar_255 key_hash UK "NOT NULL"
+        varchar_20 key_prefix "NOT NULL"
+        varchar_255 name "NULL"
+        datetime_6 created_at "NOT NULL"
+        datetime_6 updated_at "NOT NULL"
+    }
+
+    request {
+        bigint_unsigned id PK
+        bigint_unsigned client_id FK "NOT NULL"
+        bigint_unsigned project_id FK "NOT NULL"
+        varchar_36 job_id UK "NOT NULL"
+        varchar_2048 file_url "NOT NULL"
+        varchar_2048 stored_audio_url "NULL, S3 저장 오디오 URL"
+        varchar_20 status "NOT NULL"
+        datetime_6 created_at "NOT NULL"
+        datetime_6 updated_at "NOT NULL"
+    }
+
+    request_log {
+        bigint_unsigned id PK
+        bigint_unsigned request_id FK "UNIQUE, NOT NULL"
+        datetime_6 request_timestamp "NOT NULL"
+        datetime_6 completed_at
+        bigint processing_time_ms
+        double audio_duration_sec
+        json stages
+        json quality
+        json model_usage
+        json error
+    }
+
+    request_summary {
+        bigint_unsigned id PK
+        bigint_unsigned request_id FK "UNIQUE, NOT NULL"
+        varchar_512 title
+        text simple_summary
+        json doctor_notes "의사 소견"
+        json test_results "검사 결과"
+        json symptom_record "증상 기록"
+        json prescription_and_care "처방 및 관리"
+        json conversation_content "대화 내용"
+    }

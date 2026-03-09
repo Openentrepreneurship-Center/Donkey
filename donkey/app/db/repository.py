@@ -1,14 +1,18 @@
-"""Consultation / log / summary CRUD. DATABASE_URL 없으면 호출하지 않음."""
+"""Request / log / summary CRUD + admin queries. DATABASE_URL 없으면 호출하지 않음."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Consultation, ConsultationLog, ConsultationSummary
+from app.db.models import AdminUser, Client, Request, RequestLog, RequestSummary
 
 KST = timezone(timedelta(hours=9))
+
+# job에 client_id, project_id 없을 때 사용할 기본값 (마이그레이션/레거시 호환)
+DEFAULT_CLIENT_ID = 1
+DEFAULT_PROJECT_ID = 1
 
 
 def _parse_iso(s: str | None) -> datetime | None:
@@ -20,63 +24,70 @@ def _parse_iso(s: str | None) -> datetime | None:
         return None
 
 
-async def create_consultation(session: AsyncSession, job_id: str, file_url: str) -> int:
-    """consultation 1건 생성. 반환: consultation.id."""
-    c = Consultation(
+async def create_request(
+    session: AsyncSession,
+    job_id: str,
+    file_url: str,
+    client_id: int,
+    project_id: int,
+) -> int:
+    """request 1건 생성. 반환: request.id."""
+    r = Request(
         job_id=job_id,
         file_url=file_url,
         status="pending",
+        client_id=client_id,
+        project_id=project_id,
     )
-    session.add(c)
+    session.add(r)
     await session.flush()
-    return c.id
+    return r.id
 
 
-async def update_consultation_status(session: AsyncSession, consultation_id: int, status: str) -> None:
+async def update_request_status(session: AsyncSession, request_id: int, status: str) -> None:
     now = datetime.now(KST)
     await session.execute(
-        update(Consultation).where(Consultation.id == consultation_id).values(status=status, updated_at=now)
+        update(Request).where(Request.id == request_id).values(status=status, updated_at=now)
     )
 
 
-async def update_consultation_stored_audio_url(
+async def update_request_stored_audio_url(
     session: AsyncSession, job_id: str, stored_audio_url: str
 ) -> None:
-    """S3에 저장한 오디오 파일 URL을 consultation에 반영."""
-    consultation_id = await get_consultation_id_by_job_id(session, job_id)
-    if consultation_id is None:
+    """S3에 저장한 오디오 파일 URL을 request에 반영."""
+    request_id = await get_request_id_by_job_id(session, job_id)
+    if request_id is None:
         return
     now = datetime.now(KST)
     await session.execute(
-        update(Consultation)
-        .where(Consultation.id == consultation_id)
+        update(Request)
+        .where(Request.id == request_id)
         .values(stored_audio_url=stored_audio_url, updated_at=now)
     )
 
 
-async def get_consultation_id_by_job_id(session: AsyncSession, job_id: str) -> int | None:
-    r = await session.execute(select(Consultation.id).where(Consultation.job_id == job_id))
+async def get_request_id_by_job_id(session: AsyncSession, job_id: str) -> int | None:
+    r = await session.execute(select(Request.id).where(Request.job_id == job_id))
     row = r.scalar_one_or_none()
     return int(row) if row is not None else None
 
 
-
-async def create_consultation_log(
+async def create_request_log(
     session: AsyncSession,
-    consultation_id: int,
+    request_id: int,
     request_timestamp: datetime,
 ) -> None:
-    log = ConsultationLog(
-        consultation_id=consultation_id,
+    log = RequestLog(
+        request_id=request_id,
         request_timestamp=request_timestamp,
     )
     session.add(log)
     await session.flush()
 
 
-async def update_consultation_log(
+async def update_request_log(
     session: AsyncSession,
-    consultation_id: int,
+    request_id: int,
     *,
     completed_at: datetime | None = None,
     processing_time_ms: int | None = None,
@@ -104,19 +115,19 @@ async def update_consultation_log(
     if not values:
         return
     await session.execute(
-        update(ConsultationLog).where(ConsultationLog.consultation_id == consultation_id).values(**values)
+        update(RequestLog).where(RequestLog.request_id == request_id).values(**values)
     )
 
 
-async def create_consultation_summary(session: AsyncSession, consultation_id: int) -> None:
-    summary = ConsultationSummary(consultation_id=consultation_id)
+async def create_request_summary(session: AsyncSession, request_id: int) -> None:
+    summary = RequestSummary(request_id=request_id)
     session.add(summary)
     await session.flush()
 
 
-async def update_consultation_summary(
+async def update_request_summary(
     session: AsyncSession,
-    consultation_id: int,
+    request_id: int,
     *,
     title: str | None = None,
     simple_summary: str | None = None,
@@ -144,12 +155,12 @@ async def update_consultation_summary(
     if not values:
         return
     await session.execute(
-        update(ConsultationSummary).where(ConsultationSummary.consultation_id == consultation_id).values(**values)
+        update(RequestSummary).where(RequestSummary.request_id == request_id).values(**values)
     )
 
 
 def _job_log_to_log_update(job_log_dict: dict[str, Any]) -> dict[str, Any]:
-    """JobLogger.log.to_dict() 결과에서 consultation_log 업데이트용 값 추출."""
+    """JobLogger.log.to_dict() 결과에서 request_log 업데이트용 값 추출."""
     completed_at = _parse_iso(job_log_dict.get("completed_at"))
     processing_time_ms = job_log_dict.get("processing_time_ms")
     audio_duration = job_log_dict.get("audio_duration")
@@ -169,7 +180,7 @@ def _job_log_to_log_update(job_log_dict: dict[str, Any]) -> dict[str, Any]:
 
 
 def _job_to_summary_update(job: dict[str, Any]) -> dict[str, Any]:
-    """Redis job dict에서 consultation_summary 업데이트용 값 추출."""
+    """Redis job dict에서 request_summary 업데이트용 값 추출."""
     out = {
         "title": job.get("title") or None,
         "simple_summary": job.get("simpleSummary") or None,
@@ -185,39 +196,326 @@ def _job_to_summary_update(job: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-async def persist_consultation_from_job(
+async def persist_request_from_job(
     session: AsyncSession,
     job_id: str,
     job: dict[str, Any],
     job_log_dict: dict[str, Any],
     *,
+    client_id: int | None = None,
+    project_id: int | None = None,
     stored_audio_url: str | None = None,
 ) -> None:
     """
-    Redis job + JobLog dict 기준으로 consultation / log / summary 저장.
-    consultation이 없으면 생성 후 데이터 채움, 있으면 갱신만.
+    Redis job + JobLog dict 기준으로 request / log / summary 저장.
+    request가 없으면 생성 후 데이터 채움, 있으면 갱신만.
+    client_id, project_id는 job에서 추출; 없으면 기본값(1,1) 사용.
     """
-    consultation_id = await get_consultation_id_by_job_id(session, job_id)
+    cid = client_id if client_id is not None else job.get("client_id", DEFAULT_CLIENT_ID)
+    pid = project_id if project_id is not None else job.get("project_id", DEFAULT_PROJECT_ID)
+
+    request_id = await get_request_id_by_job_id(session, job_id)
     file_url = job.get("file_url", "")
 
-    if consultation_id is None:
-        consultation_id = await create_consultation(session, job_id, file_url)
-        await create_consultation_log(
-            session, consultation_id, _parse_iso(job_log_dict.get("request_timestamp")) or datetime.now(KST),
+    if request_id is None:
+        request_id = await create_request(session, job_id, file_url, cid, pid)
+        await create_request_log(
+            session, request_id, _parse_iso(job_log_dict.get("request_timestamp")) or datetime.now(KST),
         )
-        await create_consultation_summary(session, consultation_id)
+        await create_request_summary(session, request_id)
 
     status = job.get("status", "pending")
-    await update_consultation_status(session, consultation_id, status)
+    await update_request_status(session, request_id, status)
     log_vals = _job_log_to_log_update(job_log_dict)
-    await update_consultation_log(session, consultation_id, **log_vals)
+    await update_request_log(session, request_id, **log_vals)
     if status == "completed" and job.get("consultationSummary"):
         summary_vals = _job_to_summary_update(job)
-        await update_consultation_summary(session, consultation_id, **summary_vals)
+        await update_request_summary(session, request_id, **summary_vals)
     if stored_audio_url:
         now = datetime.now(KST)
         await session.execute(
-            update(Consultation)
-            .where(Consultation.id == consultation_id)
+            update(Request)
+            .where(Request.id == request_id)
             .values(stored_audio_url=stored_audio_url, updated_at=now)
         )
+
+
+# ---------------------------------------------------------------------------
+# Admin
+# ---------------------------------------------------------------------------
+
+async def get_admin_user_by_user_id(session: AsyncSession, user_id: str) -> AdminUser | None:
+    r = await session.execute(select(AdminUser).where(AdminUser.user_id == user_id))
+    return r.scalar_one_or_none()
+
+
+async def get_dashboard_stats(session: AsyncSession, client_id: int | None = None) -> dict:
+    """대시보드 통계. API_SPEC 준수."""
+    now = datetime.now(KST)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=today_start.weekday())
+    month_start = today_start.replace(day=1)
+    year_start = today_start.replace(month=1, day=1)
+
+    base_filter: list = []
+    if client_id is not None:
+        base_filter.append(Request.client_id == client_id)
+
+    async def _count_since(since: datetime) -> int:
+        q = select(func.count()).select_from(Request).where(Request.created_at >= since)
+        for f in base_filter:
+            q = q.where(f)
+        return (await session.execute(q)).scalar() or 0
+
+    today_count = await _count_since(today_start)
+    week_count = await _count_since(week_start)
+    month_count = await _count_since(month_start)
+    year_count = await _count_since(year_start)
+
+    async def _status_count(since: datetime, status: str) -> int:
+        q = select(func.count()).select_from(Request).where(
+            Request.created_at >= since, Request.status == status
+        )
+        for f in base_filter:
+            q = q.where(f)
+        return (await session.execute(q)).scalar() or 0
+
+    completed_week = await _status_count(week_start, "completed")
+    error_week = await _status_count(week_start, "error")
+    completed_month = await _status_count(month_start, "completed")
+    error_month = await _status_count(month_start, "error")
+    completed_year = await _status_count(year_start, "completed")
+    error_year = await _status_count(year_start, "error")
+
+    avg_q = (
+        select(func.avg(RequestLog.processing_time_ms))
+        .join(Request, Request.id == RequestLog.request_id)
+        .where(RequestLog.processing_time_ms.is_not(None))
+    )
+    for f in base_filter:
+        avg_q = avg_q.where(f)
+    avg_ms = (await session.execute(avg_q)).scalar()
+    avg_processing_sec = round(avg_ms / 1000, 2) if avg_ms else None
+
+    daily_counts: list[dict] = []
+    for i in range(6, -1, -1):
+        day = (today_start - timedelta(days=i)).date()
+        day_start = datetime.combine(day, datetime.min.time()).replace(tzinfo=KST)
+        day_end = day_start + timedelta(days=1)
+        dq = select(func.count()).select_from(Request).where(
+            Request.created_at >= day_start, Request.created_at < day_end
+        )
+        for f in base_filter:
+            dq = dq.where(f)
+        cnt = (await session.execute(dq)).scalar() or 0
+        daily_counts.append({"date": day.isoformat(), "count": cnt})
+
+    summary_eval_trend: list[dict] = []
+    summary_eval_result = {"avg_hr": None, "avg_ssr": None, "avg_icr": None, "eval_count": 0}
+
+    return {
+        "today_count": today_count,
+        "week_count": week_count,
+        "month_count": month_count,
+        "year_count": year_count,
+        "rate": {
+            "week": {"total": week_count, "completed": completed_week, "error": error_week},
+            "month": {"total": month_count, "completed": completed_month, "error": error_month},
+            "year": {"total": year_count, "completed": completed_year, "error": error_year},
+        },
+        "avg_processing_sec": avg_processing_sec,
+        "daily_counts": daily_counts,
+        "summary_eval": summary_eval_result,
+        "summary_eval_trend": summary_eval_trend,
+    }
+
+
+async def get_usage_by_period(
+    session: AsyncSession, from_d: date, to_d: date, client_id: int | None = None
+) -> dict:
+    from_dt = datetime.combine(from_d, datetime.min.time()).replace(tzinfo=KST)
+    to_dt = datetime.combine(to_d + timedelta(days=1), datetime.min.time()).replace(tzinfo=KST)
+    base_where = [Request.created_at >= from_dt, Request.created_at < to_dt]
+    if client_id is not None:
+        base_where.append(Request.client_id == client_id)
+
+    total = (await session.execute(select(func.count()).select_from(Request).where(*base_where))).scalar() or 0
+    completed = (await session.execute(
+        select(func.count()).select_from(Request).where(*base_where, Request.status == "completed")
+    )).scalar() or 0
+    errors = (await session.execute(
+        select(func.count()).select_from(Request).where(*base_where, Request.status == "error")
+    )).scalar() or 0
+
+    avg_q = (
+        select(func.avg(RequestLog.processing_time_ms))
+        .join(Request, Request.id == RequestLog.request_id)
+        .where(*base_where, RequestLog.processing_time_ms.is_not(None))
+    )
+    avg_ms = (await session.execute(avg_q)).scalar()
+    avg_processing_sec = round(avg_ms / 1000, 2) if avg_ms else None
+
+    daily_counts: list[dict] = []
+    cursor = from_d
+    while cursor <= to_d:
+        day_start = datetime.combine(cursor, datetime.min.time()).replace(tzinfo=KST)
+        day_end = day_start + timedelta(days=1)
+        dq = select(func.count()).select_from(Request).where(
+            Request.created_at >= day_start, Request.created_at < day_end
+        )
+        if client_id is not None:
+            dq = dq.where(Request.client_id == client_id)
+        cnt = (await session.execute(dq)).scalar() or 0
+        daily_counts.append({"date": cursor.isoformat(), "count": cnt})
+        cursor += timedelta(days=1)
+
+    return {
+        "daily_counts": daily_counts,
+        "total_count": total,
+        "completed_count": completed,
+        "error_count": errors,
+        "avg_processing_sec": avg_processing_sec,
+    }
+
+
+async def get_errors_by_period(
+    session: AsyncSession, period: str, client_id: int | None = None
+) -> list[dict]:
+    now = datetime.now(KST)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=today_start.weekday())
+    month_start = today_start.replace(day=1)
+    year_start = today_start.replace(month=1, day=1)
+    since_map = {"week": week_start, "month": month_start, "year": year_start}
+    since = since_map.get(period, week_start)
+
+    q = (
+        select(Request.job_id, Request.created_at, RequestLog.error)
+        .join(RequestLog, Request.id == RequestLog.request_id)
+        .where(Request.status == "error", Request.created_at >= since)
+        .order_by(Request.created_at.desc())
+    )
+    if client_id is not None:
+        q = q.where(Request.client_id == client_id)
+    rows = (await session.execute(q)).all()
+
+    def _normalize_error(e: dict | None) -> dict:
+        if not e or not isinstance(e, dict):
+            return {"code": "", "type": "", "message": "", "stage": "", "detail": ""}
+        return {
+            "code": e.get("type", e.get("code", "")),
+            "type": e.get("type", ""),
+            "message": e.get("message", e.get("error_message", "")),
+            "stage": e.get("stage", e.get("error_stage", "")),
+            "detail": str(e.get("detail", e)) if e.get("detail") else "",
+        }
+
+    return [
+        {
+            "job_id": r.job_id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "error": _normalize_error(r.error),
+        }
+        for r in rows
+    ]
+
+
+async def get_requests_list(
+    session: AsyncSession,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    title_query: str | None = None,
+    status_filter: str | None = None,
+    client_id: int | None = None,
+) -> tuple[list[dict], int]:
+    base = (
+        select(
+            Request.job_id,
+            Request.status,
+            Request.created_at,
+            RequestSummary.title,
+            RequestLog.processing_time_ms,
+        )
+        .outerjoin(RequestSummary, RequestSummary.request_id == Request.id)
+        .outerjoin(RequestLog, RequestLog.request_id == Request.id)
+    )
+    count_q = select(func.count()).select_from(Request)
+    if client_id is not None:
+        base = base.where(Request.client_id == client_id)
+        count_q = count_q.where(Request.client_id == client_id)
+    if status_filter:
+        base = base.where(Request.status == status_filter)
+        count_q = count_q.where(Request.status == status_filter)
+    if title_query:
+        base = base.where(RequestSummary.title.contains(title_query))
+        count_q = (
+            select(func.count())
+            .select_from(Request)
+            .outerjoin(RequestSummary, RequestSummary.request_id == Request.id)
+            .where(RequestSummary.title.contains(title_query))
+        )
+        if client_id is not None:
+            count_q = count_q.where(Request.client_id == client_id)
+        if status_filter:
+            count_q = count_q.where(Request.status == status_filter)
+
+    total = (await session.execute(count_q)).scalar() or 0
+    rows = (await session.execute(
+        base.order_by(Request.created_at.desc()).limit(limit).offset(offset)
+    )).all()
+
+    items = [
+        {
+            "job_id": r.job_id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "status": r.status,
+            "processing_sec": round(r.processing_time_ms / 1000, 2) if r.processing_time_ms else None,
+            "title": r.title,
+        }
+        for r in rows
+    ]
+    return items, total
+
+
+async def get_request_detail_by_job_id(
+    session: AsyncSession, job_id: str, client_id: int | None = None
+) -> dict | None:
+    q = select(Request, Client).join(Client, Request.client_id == Client.id).where(Request.job_id == job_id)
+    if client_id is not None:
+        q = q.where(Request.client_id == client_id)
+    row = (await session.execute(q)).first()
+    if not row:
+        return None
+    req, client = row
+    log = (await session.execute(select(RequestLog).where(RequestLog.request_id == req.id))).scalar_one_or_none()
+    summary = (await session.execute(select(RequestSummary).where(RequestSummary.request_id == req.id))).scalar_one_or_none()
+
+    processing_sec = round(log.processing_time_ms / 1000, 2) if log and log.processing_time_ms else None
+    result: dict[str, Any] = {
+        "job_id": req.job_id,
+        "created_at": req.created_at.isoformat() if req.created_at else None,
+        "status": req.status,
+        "request_type": getattr(req, "request_type", "consultation"),
+        "file_url": req.file_url,
+        "stored_audio_url": req.stored_audio_url,
+        "client_name": client.name if client else "",
+        "request_timestamp": log.request_timestamp.isoformat() if log and log.request_timestamp else None,
+        "completed_at": log.completed_at.isoformat() if log and log.completed_at else None,
+        "processing_time_ms": log.processing_time_ms if log else None,
+        "processing_sec": processing_sec,
+        "audio_duration_sec": log.audio_duration_sec if log else None,
+        "stages": log.stages if log else None,
+        "quality": log.quality if log else None,
+        "model_usage": log.model_usage if log else None,
+        "error": log.error if log else None,
+        "title": summary.title if summary else None,
+        "simple_summary": summary.simple_summary if summary else None,
+        "doctor_notes": summary.doctor_notes if summary else None,
+        "test_results": summary.test_results if summary else None,
+        "symptom_record": summary.symptom_record if summary else None,
+        "prescription_and_care": summary.prescription_and_care if summary else None,
+        "conversation_content": summary.conversation_content if summary else None,
+        "summary_eval": getattr(log, "summary_eval", None) if log else None,
+    }
+    return result

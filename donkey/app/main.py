@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 # app 하위 logger가 INFO 이상 출력되도록 (uvicorn 콘솔에 보이게)
 _app_logger = logging.getLogger("app")
@@ -15,7 +16,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
-from app.routers import ai
+from app.routers import ai, admin
 from app.schemas.error import (
     error_response,
     ERROR_400,
@@ -53,8 +54,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS (API_SPEC)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://admin.donkey.ai.kr", "http://localhost:3000"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
+
 # Include routers
 app.include_router(ai.router)
+app.include_router(admin.router)
 
 
 @app.exception_handler(RequestValidationError)

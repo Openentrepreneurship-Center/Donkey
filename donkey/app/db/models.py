@@ -1,9 +1,9 @@
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Double, ForeignKey, Index, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Double, ForeignKey, String, Text
 from sqlalchemy.dialects.mysql import JSON
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 KST = timezone(timedelta(hours=9))
 
@@ -12,11 +12,85 @@ class Base(DeclarativeBase):
     pass
 
 
-class Consultation(Base):
-    __tablename__ = "consultation"
+class AdminUser(Base):
+    """관리자 로그인 계정. client_id로 연결된 클라이언트 데이터만 조회 가능."""
+    __tablename__ = "admin_user"
 
     id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    client_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("client.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST), onupdate=lambda: datetime.now(KST))
+
+
+class Client(Base):
+    __tablename__ = "client"
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)  # admin 브랜치 호환
+    created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST), onupdate=lambda: datetime.now(KST))
+
+
+class Project(Base):
+    __tablename__ = "project"
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("client.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST), onupdate=lambda: datetime.now(KST))
+
+
+class ApiKey(Base):
+    __tablename__ = "api_key"
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("client.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    project_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    key_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    key_prefix: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST), onupdate=lambda: datetime.now(KST))
+
+
+class Request(Base):
+    __tablename__ = "request"
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("client.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    project_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("project.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     job_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    request_type: Mapped[str] = mapped_column(String(32), nullable=False, default="consultation")
     file_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     stored_audio_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -24,13 +98,13 @@ class Consultation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST), onupdate=lambda: datetime.now(KST))
 
 
-class ConsultationLog(Base):
-    __tablename__ = "consultation_log"
+class RequestLog(Base):
+    __tablename__ = "request_log"
 
     id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
-    consultation_id: Mapped[int] = mapped_column(
+    request_id: Mapped[int] = mapped_column(
         BigInteger().with_variant(BigInteger(), "mysql"),
-        ForeignKey("consultation.id", ondelete="CASCADE"),
+        ForeignKey("request.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
     )
@@ -42,15 +116,16 @@ class ConsultationLog(Base):
     quality: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     model_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    summary_eval: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
 
-class ConsultationSummary(Base):
-    __tablename__ = "consultation_summary"
+class RequestSummary(Base):
+    __tablename__ = "request_summary"
 
     id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
-    consultation_id: Mapped[int] = mapped_column(
+    request_id: Mapped[int] = mapped_column(
         BigInteger().with_variant(BigInteger(), "mysql"),
-        ForeignKey("consultation.id", ondelete="CASCADE"),
+        ForeignKey("request.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
     )

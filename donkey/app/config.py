@@ -72,6 +72,17 @@ class Settings(BaseSettings):
         validation_alias="MAX_CONCURRENT_JOBS",
     )
 
+    # Admin JWT
+    admin_jwt_secret: str = Field(
+        default="change-me-in-production",
+        validation_alias="ADMIN_JWT_SECRET",
+    )
+    admin_jwt_algorithm: str = "HS256"
+    admin_jwt_expire_minutes: int = Field(
+        default=60 * 4,
+        validation_alias="ADMIN_JWT_EXPIRE_MINUTES",
+    )
+
     model_config = {
         "env_file": Path(__file__).resolve().parent.parent / ".env",
         "env_file_encoding": "utf-8",

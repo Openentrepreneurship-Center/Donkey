@@ -92,9 +92,12 @@ async def create_ai_job(
 
     # DB 저장은 워커에서 수행(응답 지연 없음, 이벤트 루프 분리 이슈 없음)
     # Initialize job in Redis
+    # client_id, project_id: API 키 기반 조회 후 설정 예정. 당분간 기본값 사용
     await store.create_job(job_id, {
         "id": job_id,
         "status": "pending",
+        "client_id": 1,
+        "project_id": 1,
         "file_url": file_url,
         "isGenerated": False,
         "isAbusing": False,

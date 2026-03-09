@@ -1,22 +1,46 @@
 # MySQL 예시 로우 (테이블별 1건)
 
-진료 1건 기준으로 `consultation`, `consultation_log`, `consultation_summary` 각 1행 예시.
+요청 1건 기준으로 `client`, `project`, `request`, `request_log`, `request_summary` 관계 예시.
 
 ---
 
-## 1. consultation
+## 1. client
 
-| id  | job_id                               | file_url                                                                      | status    | created_at                 | updated_at                 |
-| --- | ------------------------------------ | ----------------------------------------------------------------------------- | --------- | -------------------------- | -------------------------- |
-| 1   | a1b2c3d4-e5f6-7890-abcd-ef1234567890 | https://bucket.s3.ap-northeast-2.amazonaws.com/recordings/2025/02/rec_001.wav | completed | 2025-02-16 09:00:00.000000 | 2025-02-16 09:02:31.000000 |
+| id  | name      | created_at                 | updated_at                 |
+| --- | --------- | -------------------------- | -------------------------- |
+| 1   | Acme Corp | 2025-02-16 09:00:00.000000 | 2025-02-16 09:00:00.000000 |
 
 ---
 
-## 2. consultation_log
+## 2. project
 
-| id  | consultation_id | request_timestamp          | completed_at               | processing_time_ms | audio_duration_sec | stages    | quality   | model_usage | error |
-| --- | --------------- | -------------------------- | -------------------------- | ------------------ | ------------------ | --------- | --------- | ----------- | ----- |
-| 1   | 1               | 2025-02-16 09:00:00.000000 | 2025-02-16 09:02:31.000000 | 151200             | 312.5              | 아래 JSON | 아래 JSON | 아래 JSON   | NULL  |
+| id  | client_id | name            | created_at                 | updated_at                 |
+| --- | --------- | --------------- | -------------------------- | -------------------------- |
+| 1   | 1         | 병원 A 프로젝트 | 2025-02-16 09:00:00.000000 | 2025-02-16 09:00:00.000000 |
+
+---
+
+## 3. api_key (선택, API 인증용)
+
+| id  | client_id | project_id | key_hash      | key_prefix | name    | created_at | updated_at |
+| --- | --------- | ---------- | ------------- | ---------- | ------- | ---------- | ---------- |
+| 1   | 1         | 1          | (SHA256 해시) | dky\_      | 메인 키 | ...        | ...        |
+
+---
+
+## 4. request
+
+| id  | client_id | project_id | job_id                               | file_url                                                                      | stored_audio_url | status    | created_at                 | updated_at                 |
+| --- | --------- | ---------- | ------------------------------------ | ----------------------------------------------------------------------------- | ---------------- | --------- | -------------------------- | -------------------------- |
+| 1   | 1         | 1          | a1b2c3d4-e5f6-7890-abcd-ef1234567890 | https://bucket.s3.ap-northeast-2.amazonaws.com/recordings/2025/02/rec_001.wav | (S3 URL)         | completed | 2025-02-16 09:00:00.000000 | 2025-02-16 09:02:31.000000 |
+
+---
+
+## 5. request_log
+
+| id  | request_id | request_timestamp          | completed_at               | processing_time_ms | audio_duration_sec | stages    | quality   | model_usage | error |
+| --- | ---------- | -------------------------- | -------------------------- | ------------------ | ------------------ | --------- | --------- | ----------- | ----- |
+| 1   | 1          | 2025-02-16 09:00:00.000000 | 2025-02-16 09:02:31.000000 | 151200             | 312.5              | 아래 JSON | 아래 JSON | 아래 JSON   | NULL  |
 
 **stages** (JSON):
 
@@ -55,11 +79,11 @@
 
 ---
 
-## 3. consultation_summary
+## 6. request_summary
 
-| id  | consultation_id | title                               | simple_summary                                     | doctor_notes | test_results | symptom_record | prescription_and_care | conversation_content |
-| --- | --------------- | ----------------------------------- | -------------------------------------------------- | ------------ | ------------ | -------------- | --------------------- | -------------------- |
-| 1   | 1               | 두통·현훈으로 내원한 50대 남성 진료 | 환자 두통, 현훈 호소. 혈압 측정 및 약물 조절 권고. | 아래 JSON    | 아래 JSON    | 아래 JSON      | 아래 JSON             | 아래 JSON            |
+| id  | request_id | title                               | simple_summary                                     | doctor_notes | test_results | symptom_record | prescription_and_care | conversation_content |
+| --- | ---------- | ----------------------------------- | -------------------------------------------------- | ------------ | ------------ | -------------- | --------------------- | -------------------- |
+| 1   | 1          | 두통·현훈으로 내원한 50대 남성 진료 | 환자 두통, 현훈 호소. 혈압 측정 및 약물 조절 권고. | 아래 JSON    | 아래 JSON    | 아래 JSON      | 아래 JSON             | 아래 JSON            |
 
 **doctor_notes** (JSON):
 
@@ -118,9 +142,9 @@
 
 ---
 
-## 에러 케이스 예시 (consultation_log만)
+## 에러 케이스 예시 (request_log만)
 
-status가 `error`인 진료의 로그에서 **error** 컬럼만 채워진 경우:
+status가 `error`인 요청의 로그에서 **error** 컬럼만 채워진 경우:
 
 | error (JSON)                                                                                                                   |
 | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -128,4 +152,4 @@ status가 `error`인 진료의 로그에서 **error** 컬럼만 채워진 경우
 
 ---
 
-이렇게 한 진료(consultation id=1)에 대해 log 1행, summary 1행이 1:1로 연결되는 느낌입니다.
+한 요청(request id=1)에 대해 log 1행, summary 1행이 1:1로 연결되며, request는 client_id·project_id로 어떤 클라이언트·프로젝트의 요청인지 구분합니다.
