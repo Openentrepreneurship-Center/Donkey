@@ -58,7 +58,7 @@ async def create_ai_job(
     req: Request,
     request: AIRequest,
     background_tasks: BackgroundTasks,
-    _api_key: str = Depends(verify_api_key),
+    api_key_ctx: tuple[int, int] = Depends(verify_api_key),
 ):
     """
     오디오 전사 및 SOAP 요약을 위한 새 AI 처리 작업을 생성합니다.
@@ -89,15 +89,15 @@ async def create_ai_job(
             )
 
     store = await get_job_store()
+    client_id, project_id = api_key_ctx
 
     # DB 저장은 워커에서 수행(응답 지연 없음, 이벤트 루프 분리 이슈 없음)
     # Initialize job in Redis
-    # client_id, project_id: API 키 기반 조회 후 설정 예정. 당분간 기본값 사용
     await store.create_job(job_id, {
         "id": job_id,
         "status": "pending",
-        "client_id": 1,
-        "project_id": 1,
+        "client_id": client_id,
+        "project_id": project_id,
         "file_url": file_url,
         "isGenerated": False,
         "isAbusing": False,
@@ -130,7 +130,7 @@ async def create_ai_job(
 )
 async def get_ai_result(
     job_id: str,
-    _api_key: str = Depends(verify_api_key),
+    _api_key_ctx: tuple[int, int] = Depends(verify_api_key),
 ):
     """
     AI 처리 작업의 결과를 조회합니다.

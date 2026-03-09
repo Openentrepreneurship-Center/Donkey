@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AdminUser, Client, Request, RequestLog, RequestSummary
+from app.db.models import AdminUser, ApiKey, Client, Request, RequestLog, RequestSummary
 
 KST = timezone(timedelta(hours=9))
 
@@ -238,6 +238,22 @@ async def persist_request_from_job(
             .where(Request.id == request_id)
             .values(stored_audio_url=stored_audio_url, updated_at=now)
         )
+
+
+# ---------------------------------------------------------------------------
+# API Key
+# ---------------------------------------------------------------------------
+
+
+async def get_api_key_context_by_hash(
+    session: AsyncSession, key_hash: str
+) -> tuple[int, int] | None:
+    """key_hash로 api_key 조회. 있으면 (client_id, project_id), 없으면 None."""
+    r = await session.execute(
+        select(ApiKey.client_id, ApiKey.project_id).where(ApiKey.key_hash == key_hash)
+    )
+    row = r.first()
+    return (row[0], row[1]) if row else None
 
 
 # ---------------------------------------------------------------------------
