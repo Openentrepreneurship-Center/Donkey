@@ -136,3 +136,42 @@ class RequestSummary(Base):
     symptom_record: Mapped[list | None] = mapped_column(JSON, nullable=True)
     prescription_and_care: Mapped[list | None] = mapped_column(JSON, nullable=True)
     conversation_content: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
+class Inquiry(Base):
+    __tablename__ = "inquiry"
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    author_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("admin_user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    project_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("project.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST), onupdate=lambda: datetime.now(KST))
+
+
+class InquiryReply(Base):
+    __tablename__ = "inquiry_reply"
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
+    inquiry_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("inquiry.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    author_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(BigInteger(), "mysql"),
+        ForeignKey("admin_user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST))

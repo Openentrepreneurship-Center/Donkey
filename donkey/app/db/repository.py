@@ -3,10 +3,20 @@
 from datetime import date, datetime, timezone, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AdminUser, ApiKey, Client, Project, Request, RequestLog, RequestSummary
+from app.db.models import (
+    AdminUser,
+    ApiKey,
+    Client,
+    Inquiry,
+    InquiryReply,
+    Project,
+    Request,
+    RequestLog,
+    RequestSummary,
+)
 
 KST = timezone(timedelta(hours=9))
 
@@ -575,3 +585,180 @@ async def get_request_detail_by_job_id(
         "summary_eval": getattr(log, "summary_eval", None) if log else None,
     }
     return result
+
+
+# ---------------------------------------------------------------------------
+# Inquiry (CS)
+# ---------------------------------------------------------------------------
+
+
+async def create_inquiry(
+    session: AsyncSession,
+    title: str,
+    body: str,
+    author_id: int,
+    project_id: int | None = None,
+) -> dict:
+    """문의 등록. 반환: 생성된 문의 dict."""
+    inv = Inquiry(title=title, body=body, status="pending", author_id=author_id, project_id=project_id)
+    session.add(inv)
+    await session.flush()
+    author = (await session.execute(select(AdminUser).where(AdminUser.id == author_id))).scalar_one_or_none()
+    proj = (await session.execute(select(Project.id, Project.name).where(Project.id == project_id))).first() if project_id else None
+    return {
+        "id": inv.id,
+        "title": inv.title,
+        "body": inv.body,
+        "status": inv.status,
+        "project_id": inv.project_id,
+        "project": {"id": proj[0], "name": proj[1]} if proj else None,
+        "created_at": inv.created_at.isoformat() if inv.created_at else None,
+        "author": author.display_name or author.user_id if author else "",
+    }
+
+
+async def get_inquiries_list(
+    session: AsyncSession,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    status_filter: str | None = None,
+    project_id: int | None = None,
+    q: str | None = None,
+) -> tuple[list[dict], int]:
+    """문의 목록 + total. status, project_id, q(검색어) 필터."""
+    base = (
+        select(
+            Inquiry.id,
+            Inquiry.title,
+            Inquiry.status,
+            Inquiry.project_id,
+            Inquiry.created_at,
+            Inquiry.updated_at,
+            AdminUser.display_name,
+            AdminUser.user_id,
+            Project.name,
+        )
+        .join(AdminUser, Inquiry.author_id == AdminUser.id)
+        .outerjoin(Project, Inquiry.project_id == Project.id)
+    )
+    count_q = select(func.count()).select_from(Inquiry)
+    if status_filter and status_filter in ("pending", "in_progress", "completed"):
+        base = base.where(Inquiry.status == status_filter)
+        count_q = count_q.where(Inquiry.status == status_filter)
+    if project_id is not None:
+        base = base.where(Inquiry.project_id == project_id)
+        count_q = count_q.where(Inquiry.project_id == project_id)
+    if q and q.strip():
+        search = q.strip()
+        search_cond = or_(Inquiry.title.contains(search), Inquiry.body.contains(search))
+        base = base.where(search_cond)
+        count_q = count_q.where(search_cond)
+    total = (await session.execute(count_q)).scalar() or 0
+    rows = (await session.execute(
+        base.order_by(Inquiry.created_at.desc()).limit(limit).offset(offset)
+    )).all()
+    items = [
+        {
+            "id": r[0],
+            "title": r[1],
+            "status": r[2],
+            "project_id": r[3],
+            "project": {"id": r[3], "name": r[8]} if r[3] and r[8] else None,
+            "created_at": r[4].isoformat() if r[4] else None,
+            "updated_at": r[5].isoformat() if r[5] else None,
+            "author": r[6] or r[7] or "",
+        }
+        for r in rows
+    ]
+    return items, total
+
+
+async def get_inquiry_detail(session: AsyncSession, inquiry_id: int) -> dict | None:
+    """문의 상세 + replies."""
+    row = (
+        await session.execute(
+            select(Inquiry, AdminUser.display_name, AdminUser.user_id, Project.id, Project.name)
+            .join(AdminUser, Inquiry.author_id == AdminUser.id)
+            .outerjoin(Project, Inquiry.project_id == Project.id)
+            .where(Inquiry.id == inquiry_id)
+        )
+    ).first()
+    if not row:
+        return None
+    inv, author_dn, author_uid, proj_id, proj_name = row
+    reply_rows = (
+        await session.execute(
+            select(InquiryReply.id, InquiryReply.body, InquiryReply.created_at, AdminUser.display_name, AdminUser.user_id)
+            .join(AdminUser, InquiryReply.author_id == AdminUser.id)
+            .where(InquiryReply.inquiry_id == inquiry_id)
+            .order_by(InquiryReply.created_at.asc())
+        )
+    ).all()
+    replies = [
+        {
+            "id": r[0],
+            "body": r[1],
+            "created_at": r[2].isoformat() if r[2] else None,
+            "author": r[3] or r[4] or "",
+        }
+        for r in reply_rows
+    ]
+    return {
+        "id": inv.id,
+        "title": inv.title,
+        "body": inv.body,
+        "status": inv.status,
+        "project_id": inv.project_id,
+        "project": {"id": proj_id, "name": proj_name} if proj_id and proj_name else None,
+        "created_at": inv.created_at.isoformat() if inv.created_at else None,
+        "updated_at": inv.updated_at.isoformat() if inv.updated_at else None,
+        "author": author_dn or author_uid or "",
+        "author_email": author_uid or "",
+        "replies": replies,
+    }
+
+
+async def update_inquiry_status(
+    session: AsyncSession, inquiry_id: int, status: str
+) -> dict | None:
+    """문의 상태 변경. 반환: id, status, updated_at 또는 None."""
+    if status not in ("pending", "in_progress", "completed"):
+        return None
+    result = await session.execute(
+        update(Inquiry).where(Inquiry.id == inquiry_id).values(status=status)
+    )
+    if result.rowcount == 0:
+        return None
+    await session.flush()
+    row = (
+        await session.execute(
+            select(Inquiry.id, Inquiry.status, Inquiry.updated_at).where(Inquiry.id == inquiry_id)
+        )
+    ).first()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "status": row[1],
+        "updated_at": row[2].isoformat() if row[2] else None,
+    }
+
+
+async def create_inquiry_reply(
+    session: AsyncSession, inquiry_id: int, body: str, author_id: int
+) -> dict | None:
+    """문의 답변 등록. inquiry 없으면 None."""
+    inv = (await session.execute(select(Inquiry).where(Inquiry.id == inquiry_id))).scalar_one_or_none()
+    if not inv:
+        return None
+    reply = InquiryReply(inquiry_id=inquiry_id, body=body, author_id=author_id)
+    session.add(reply)
+    await session.flush()
+    author = (await session.execute(select(AdminUser).where(AdminUser.id == author_id))).scalar_one_or_none()
+    return {
+        "id": reply.id,
+        "body": reply.body,
+        "created_at": reply.created_at.isoformat() if reply.created_at else None,
+        "author": author.display_name or author.user_id if author else "",
+    }

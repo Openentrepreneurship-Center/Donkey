@@ -9,13 +9,18 @@ from pydantic import BaseModel
 from app.auth import create_access_token, decode_access_token, verify_password
 from app.db import is_db_configured
 from app.db.repository import (
+    create_inquiry,
+    create_inquiry_reply,
     get_admin_user_by_user_id,
     get_dashboard_stats,
     get_distinct_projects,
     get_errors_by_period,
+    get_inquiry_detail,
+    get_inquiries_list,
     get_request_detail_by_job_id,
     get_requests_list,
     get_usage_by_period,
+    update_inquiry_status,
 )
 from app.db.session import get_session
 from app.schemas.error import ERROR_401, error_response
@@ -28,6 +33,20 @@ security = HTTPBearer(auto_error=False)
 class LoginRequest(BaseModel):
     user_id: str
     password: str
+
+
+class InquiryCreateBody(BaseModel):
+    title: str
+    body: str
+    project_id: int | None = None
+
+
+class InquiryStatusBody(BaseModel):
+    status: str
+
+
+class InquiryReplyBody(BaseModel):
+    body: str
 
 
 @router.post("/login")
@@ -216,6 +235,129 @@ async def get_request_detail(job_id: str, admin=Depends(get_current_admin)):
     if detail is None:
         raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 요청을 찾을 수 없습니다."))
     return detail
+
+
+# ---------------------------------------------------------------------------
+# Inquiry (CS)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/inquiries", status_code=201)
+async def create_inquiry_endpoint(
+    body: InquiryCreateBody,
+    admin=Depends(get_current_admin),
+):
+    """문의 등록."""
+    if not is_db_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=error_response("SERVICE_UNAVAILABLE", "DB 연결이 필요합니다."),
+        )
+    try:
+        async with get_session() as session:
+            result = await create_inquiry(
+                session, body.title, body.body, admin.id, body.project_id
+            )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=error_response("COMMON_500_000", f"문의 등록 중 오류: {e!s}"),
+        )
+
+
+@router.get("/inquiries")
+async def list_inquiries(
+    admin=Depends(get_current_admin),
+    page: int = 1,
+    limit: int = 50,
+    status: str | None = None,
+    project_id: int | None = None,
+    q: str | None = None,
+):
+    """문의 목록."""
+    if not is_db_configured():
+        return {"items": [], "total": 0}
+    limit = max(1, min(limit, 100))
+    offset = (page - 1) * limit
+    status_filter = status.strip() if status and status.strip() else None
+    try:
+        async with get_session() as session:
+            items, total = await get_inquiries_list(
+                session,
+                limit=limit,
+                offset=offset,
+                status_filter=status_filter,
+                project_id=project_id,
+                q=q,
+            )
+        return {"items": items, "total": total}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=error_response("COMMON_500_000", f"문의 목록 조회 중 오류: {e!s}"),
+        )
+
+
+@router.get("/inquiries/{inquiry_id}")
+async def get_inquiry_detail_endpoint(
+    inquiry_id: int,
+    admin=Depends(get_current_admin),
+):
+    """문의 상세."""
+    if not is_db_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=error_response("SERVICE_UNAVAILABLE", "DB 연결이 필요합니다."),
+        )
+    async with get_session() as session:
+        detail = await get_inquiry_detail(session, inquiry_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 문의를 찾을 수 없습니다."))
+    return detail
+
+
+@router.patch("/inquiries/{inquiry_id}")
+async def patch_inquiry_status(
+    inquiry_id: int,
+    body: InquiryStatusBody,
+    admin=Depends(get_current_admin),
+):
+    """문의 상태 변경."""
+    if not is_db_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=error_response("SERVICE_UNAVAILABLE", "DB 연결이 필요합니다."),
+        )
+    async with get_session() as session:
+        result = await update_inquiry_status(session, inquiry_id, body.status)
+    if result is None:
+        raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 문의를 찾을 수 없습니다."))
+    return result
+
+
+@router.post("/inquiries/{inquiry_id}/replies")
+async def create_inquiry_reply_endpoint(
+    inquiry_id: int,
+    body: InquiryReplyBody,
+    admin=Depends(get_current_admin),
+):
+    """문의 답변 등록."""
+    if not is_db_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=error_response("SERVICE_UNAVAILABLE", "DB 연결이 필요합니다."),
+        )
+    async with get_session() as session:
+        result = await create_inquiry_reply(session, inquiry_id, body.body, admin.id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 문의를 찾을 수 없습니다."))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
 
 
 @router.get("/errors")
