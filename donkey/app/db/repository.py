@@ -804,3 +804,46 @@ async def create_inquiry_reply(
         "created_at": reply.created_at.isoformat() if reply.created_at else None,
         "author": author.display_name or author.user_id if author else "",
     }
+
+
+async def update_inquiry_reply(
+    session: AsyncSession, inquiry_id: int, reply_id: int, body: str
+) -> dict | None:
+    """문의 답변 수정. reply 없거나 inquiry_id 불일치면 None."""
+    result = await session.execute(
+        update(InquiryReply)
+        .where(InquiryReply.id == reply_id, InquiryReply.inquiry_id == inquiry_id)
+        .values(body=body)
+    )
+    if result.rowcount == 0:
+        return None
+    await session.flush()
+    row = (
+        await session.execute(
+            select(InquiryReply, AdminUser.display_name, AdminUser.user_id)
+            .join(AdminUser, InquiryReply.author_id == AdminUser.id)
+            .where(InquiryReply.id == reply_id)
+        )
+    ).first()
+    if not row:
+        return None
+    r, dn, uid = row
+    return {
+        "id": r.id,
+        "body": r.body,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "author": dn or uid or "",
+    }
+
+
+async def delete_inquiry_reply(
+    session: AsyncSession, inquiry_id: int, reply_id: int
+) -> bool:
+    """문의 답변 삭제. inquiry_id 일치하는 reply만 삭제."""
+    result = await session.execute(
+        delete(InquiryReply).where(
+            InquiryReply.id == reply_id,
+            InquiryReply.inquiry_id == inquiry_id,
+        )
+    )
+    return result.rowcount > 0

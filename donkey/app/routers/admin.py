@@ -13,6 +13,8 @@ from app.db.repository import (
     create_inquiry,
     create_inquiry_reply,
     delete_inquiry,
+    delete_inquiry_reply,
+    update_inquiry_reply,
     get_admin_user_by_user_id,
     update_inquiry,
     get_dashboard_stats,
@@ -461,6 +463,44 @@ async def create_inquiry_reply_endpoint(
     if result is None:
         raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 문의를 찾을 수 없습니다."))
     return result
+
+
+@router.patch("/inquiries/{inquiry_id}/replies/{reply_id}")
+async def patch_inquiry_reply_endpoint(
+    inquiry_id: int,
+    reply_id: int,
+    body: InquiryReplyBody,
+    admin=Depends(get_current_admin),
+):
+    """문의 답변 수정."""
+    if not is_db_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=error_response("SERVICE_UNAVAILABLE", "DB 연결이 필요합니다."),
+        )
+    async with get_session() as session:
+        result = await update_inquiry_reply(session, inquiry_id, reply_id, body.body)
+    if result is None:
+        raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 답변을 찾을 수 없습니다."))
+    return result
+
+
+@router.delete("/inquiries/{inquiry_id}/replies/{reply_id}", status_code=204)
+async def delete_inquiry_reply_endpoint(
+    inquiry_id: int,
+    reply_id: int,
+    admin=Depends(get_current_admin),
+):
+    """문의 답변 삭제."""
+    if not is_db_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=error_response("SERVICE_UNAVAILABLE", "DB 연결이 필요합니다."),
+        )
+    async with get_session() as session:
+        deleted = await delete_inquiry_reply(session, inquiry_id, reply_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 답변을 찾을 수 없습니다."))
 
 
 # ---------------------------------------------------------------------------
