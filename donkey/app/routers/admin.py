@@ -124,7 +124,11 @@ async def list_projects(admin=Depends(get_current_admin)):
 
 @router.get("/me")
 async def me(admin=Depends(get_current_admin)):
-    return {"user_id": admin.user_id, "display_name": admin.display_name}
+    return {
+        "user_id": admin.user_id,
+        "display_name": admin.display_name or admin.user_id,
+        "role": getattr(admin, "role", None) or "admin",
+    }
 
 
 @router.post("/refresh")
