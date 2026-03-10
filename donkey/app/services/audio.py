@@ -1,4 +1,5 @@
 import subprocess
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -79,5 +80,35 @@ def upload_audio_to_s3(wav_path: str | Path, job_id: str) -> str | None:
             )
         url = f"https://{settings.s3_logs_bucket}.s3.{settings.aws_region}.amazonaws.com/{key}"
         return url
+    except (ClientError, Exception):
+        return None
+
+
+def upload_inquiry_attachment_to_s3(
+    content: bytes, filename: str, content_type: str | None = None
+) -> str | None:
+    """
+    문의 첨부파일을 S3 inquiry-attachments 폴더에 업로드.
+    s3_logs_bucket 없으면 스킵. 성공 시 URL 반환.
+    """
+    settings = get_settings()
+    if not settings.s3_logs_bucket:
+        return None
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        ext = Path(filename).suffix or ""
+        date_prefix = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+        key = f"{settings.s3_inquiry_attachments_prefix.rstrip('/')}/{date_prefix}/{uuid.uuid4().hex}{ext}"
+        ct = content_type or "application/octet-stream"
+        client = boto3.client("s3", region_name=settings.aws_region)
+        client.put_object(
+            Bucket=settings.s3_logs_bucket,
+            Key=key,
+            Body=content,
+            ContentType=ct,
+        )
+        return f"https://{settings.s3_logs_bucket}.s3.{settings.aws_region}.amazonaws.com/{key}"
     except (ClientError, Exception):
         return None

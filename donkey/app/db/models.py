@@ -144,6 +144,7 @@ class Inquiry(Base):
     id: Mapped[int] = mapped_column(BigInteger().with_variant(BigInteger(), "mysql"), primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     author_id: Mapped[int] = mapped_column(
         BigInteger().with_variant(BigInteger(), "mysql"),

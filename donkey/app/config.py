@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # S3에 변환된 오디오(WAV) 업로드 (같은 버킷, 폴더 prefix)
     s3_audio_prefix: str = Field(default="audio-data", validation_alias="S3_AUDIO_PREFIX")
     save_audio_to_s3: bool = Field(default=True, validation_alias="SAVE_AUDIO_TO_S3")
+    s3_inquiry_attachments_prefix: str = Field(
+        default="inquiry-attachments", validation_alias="S3_INQUIRY_ATTACHMENTS_PREFIX"
+    )
 
     # Models
     stt_model: str = "gpt-4o-mini-transcribe"

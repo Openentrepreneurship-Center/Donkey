@@ -598,9 +598,17 @@ async def create_inquiry(
     body: str,
     author_id: int,
     project_id: int | None = None,
+    attachment_urls: list[str] | None = None,
 ) -> dict:
     """문의 등록. 반환: 생성된 문의 dict."""
-    inv = Inquiry(title=title, body=body, status="pending", author_id=author_id, project_id=project_id)
+    inv = Inquiry(
+        title=title,
+        body=body,
+        status="pending",
+        author_id=author_id,
+        project_id=project_id,
+        attachment_urls=attachment_urls or [],
+    )
     session.add(inv)
     await session.flush()
     author = (await session.execute(select(AdminUser).where(AdminUser.id == author_id))).scalar_one_or_none()
@@ -610,6 +618,7 @@ async def create_inquiry(
         "title": inv.title,
         "body": inv.body,
         "status": inv.status,
+        "attachment_urls": inv.attachment_urls or [],
         "project_id": inv.project_id,
         "project": {"id": proj[0], "name": proj[1]} if proj else None,
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
@@ -709,6 +718,7 @@ async def get_inquiry_detail(session: AsyncSession, inquiry_id: int) -> dict | N
         "title": inv.title,
         "body": inv.body,
         "status": inv.status,
+        "attachment_urls": inv.attachment_urls or [],
         "project_id": inv.project_id,
         "project": {"id": proj_id, "name": proj_name} if proj_id and proj_name else None,
         "created_at": inv.created_at.isoformat() if inv.created_at else None,

@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -26,6 +26,7 @@ from app.db.repository import (
 )
 from app.db.session import get_session
 from app.schemas.error import ERROR_401, error_response
+from app.services.audio import upload_inquiry_attachment_to_s3
 from app.services.slack import notify_slack
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
@@ -42,6 +43,7 @@ class InquiryCreateBody(BaseModel):
     title: str
     body: str
     project_id: int | None = None
+    attachment_urls: list[str] | None = None
 
 
 class InquiryStatusBody(BaseModel):
@@ -245,6 +247,26 @@ async def get_request_detail(job_id: str, admin=Depends(get_current_admin)):
 # ---------------------------------------------------------------------------
 
 
+@router.post("/inquiries/attachments/upload")
+async def upload_inquiry_attachment(admin=Depends(get_current_admin), file: UploadFile = File(...)):
+    """
+    문의 첨부파일을 S3에 업로드. 성공 시 URL 반환.
+    문의 등록 시 attachment_urls에 이 URL들을 넣어서 사용.
+    """
+    content = await file.read()
+    url = upload_inquiry_attachment_to_s3(
+        content,
+        file.filename or "attachment",
+        file.content_type,
+    )
+    if url is None:
+        raise HTTPException(
+            status_code=503,
+            detail=error_response("SERVICE_UNAVAILABLE", "S3 업로드가 설정되지 않았습니다."),
+        )
+    return {"url": url}
+
+
 @router.post("/inquiries", status_code=201)
 async def create_inquiry_endpoint(
     body: InquiryCreateBody,
@@ -259,7 +281,12 @@ async def create_inquiry_endpoint(
     try:
         async with get_session() as session:
             result = await create_inquiry(
-                session, body.title, body.body, admin.id, body.project_id
+                session,
+                body.title,
+                body.body,
+                admin.id,
+                body.project_id,
+                body.attachment_urls,
             )
         notify_slack(
             get_settings().slack_webhook_url,
