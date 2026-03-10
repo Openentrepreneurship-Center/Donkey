@@ -55,11 +55,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS (API_SPEC)
+# CORS (CORS_ORIGINS 환경변수, 기본값 있음)
+_origins = [o.strip() for o in get_settings().cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://admin.donkey.ai.kr", "http://localhost:3000"],
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_origins=_origins or ["https://admin.donkey.ai.kr", "http://localhost:3000"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     allow_credentials=True,
 )

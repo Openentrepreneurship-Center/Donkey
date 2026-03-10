@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # Slack 알림 (비우면 미발송)
     slack_webhook_url: str = Field(default="", validation_alias="SLACK_WEBHOOK_URL")
 
+    # CORS (쉼표 구분, 예: https://admin.donkey.ai.kr,http://localhost:3000)
+    cors_origins: str = Field(
+        default="https://admin.donkey.ai.kr,http://localhost:3000",
+        validation_alias="CORS_ORIGINS",
+    )
+
     # Admin JWT
     admin_jwt_secret: str = Field(
         default="change-me-in-production",
