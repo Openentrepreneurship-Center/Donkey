@@ -52,14 +52,14 @@ async def _persist_consultation_if_configured(
     if not is_db_configured():
         return
     from app.db.session import get_session
-    from app.db.repository import persist_consultation_from_job
+    from app.db.repository import persist_request_from_job
     for attempt in range(1, _DB_RETRY_COUNT + 1):
         try:
             job = await store.get_job(job_id)
             if not job:
                 return
             async with get_session() as session:
-                await persist_consultation_from_job(
+                await persist_request_from_job(
                     session, job_id, job, logger_instance.log.to_dict(),
                     stored_audio_url=stored_audio_url,
                 )
