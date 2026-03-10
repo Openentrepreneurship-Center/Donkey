@@ -32,6 +32,7 @@ from app.services.summarization import (
 from app.services.pii_filter import filter_pii, filter_pii_with_screening
 from app.services.validation import validate_medical_conversation
 from app.services.job_logger import JobLogger
+from app.services.slack import notify_slack
 
 # 음성 길이 기준 처리 임계 초과 시 오류 메시지
 TIMEOUT_ERROR_MESSAGE = "처리 시간이 제한을 초과했습니다. (오디오 길이 기준 임계시간)"
@@ -96,6 +97,10 @@ async def _check_timeout_and_abort(
         "screeningReason": "해당되는 내용 없음.",
         "screening": {"names": [], "phones": []},
     })
+    notify_slack(
+        get_settings().slack_webhook_url,
+        f"🚨 [Donkey] AI 처리 오류\njob_id: {job_id}\n원인: {TIMEOUT_ERROR_MESSAGE}\nstage: timeout",
+    )
     await _persist_consultation_if_configured(store, job_id, logger)
     return True
 
@@ -382,6 +387,10 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             "screeningReason": "해당되는 내용 없음.",
             "screening": {"names": [], "phones": []},
         })
+        notify_slack(
+            get_settings().slack_webhook_url,
+            f"🚨 [Donkey] AI 처리 오류\njob_id: {job_id}\n원인: {type(e).__name__}: {e}\nstage: {current_stage}",
+        )
         await _persist_consultation_if_configured(
             store, job_id, logger,
             stored_audio_url=locals().get("s3_audio_url"),

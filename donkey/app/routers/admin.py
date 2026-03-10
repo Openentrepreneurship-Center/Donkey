@@ -7,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from app.auth import create_access_token, decode_access_token, verify_password
+from app.config import get_settings
 from app.db import is_db_configured
 from app.db.repository import (
     create_inquiry,
@@ -25,6 +26,7 @@ from app.db.repository import (
 )
 from app.db.session import get_session
 from app.schemas.error import ERROR_401, error_response
+from app.services.slack import notify_slack
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
 
@@ -259,6 +261,10 @@ async def create_inquiry_endpoint(
             result = await create_inquiry(
                 session, body.title, body.body, admin.id, body.project_id
             )
+        notify_slack(
+            get_settings().slack_webhook_url,
+            f"📩 [Donkey] 새 문의 등록\nid: {result['id']}\n제목: {result['title']}\n작성자: {result['author']}",
+        )
         return result
     except Exception as e:
         raise HTTPException(

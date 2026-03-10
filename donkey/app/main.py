@@ -27,6 +27,7 @@ from app.schemas.error import (
     ERROR_500,
 )
 from app.config import get_settings
+from app.services.slack import notify_slack
 from app.store.redis import close_all_redis_clients
 from app.db import init_db, is_db_configured
 
@@ -78,6 +79,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """HTTPException 시 규격 오류 본문 { code, message } 로 반환."""
+    if exc.status_code >= 500:
+        notify_slack(
+            get_settings().slack_webhook_url,
+            f"🚨 [Donkey] API {exc.status_code} 오류\n{request.method} {request.url.path}\n{exc.detail}",
+        )
     if isinstance(exc.detail, dict) and "code" in exc.detail and "message" in exc.detail:
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
     status_to_error = {
@@ -95,6 +101,10 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """500: 미처리 예외."""
+    notify_slack(
+        get_settings().slack_webhook_url,
+        f"🚨 [Donkey] API 500 오류\n{request.method} {request.url.path}\n{type(exc).__name__}: {exc}",
+    )
     code, message = ERROR_500
     return JSONResponse(status_code=500, content=error_response(code, message))
 

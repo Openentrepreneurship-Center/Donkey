@@ -72,6 +72,9 @@ class Settings(BaseSettings):
         validation_alias="MAX_CONCURRENT_JOBS",
     )
 
+    # Slack 알림 (비우면 미발송)
+    slack_webhook_url: str = Field(default="", validation_alias="SLACK_WEBHOOK_URL")
+
     # Admin JWT
     admin_jwt_secret: str = Field(
         default="change-me-in-production",
