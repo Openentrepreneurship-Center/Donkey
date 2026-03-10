@@ -421,6 +421,14 @@ resource "aws_db_instance" "main" {
   }
 }
 
+# S3_LOGS_BUCKET를 SSM에 저장 → 배포 시 GitHub Actions가 읽어서 .env에 넣음
+resource "aws_ssm_parameter" "s3_logs_bucket" {
+  name        = "/${var.project_name}/S3_LOGS_BUCKET"
+  description = "S3 bucket for job logs, audio, inquiry attachments"
+  type        = "String"
+  value       = aws_s3_bucket.logs.bucket
+}
+
 # DATABASE_URL를 SSM에 저장 → 배포 시 GitHub Actions가 읽어서 .env에 넣음
 resource "aws_ssm_parameter" "database_url" {
   name        = "/${var.project_name}/DATABASE_URL"

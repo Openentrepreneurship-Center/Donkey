@@ -58,19 +58,16 @@ jobs:
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "Found instance: $INSTANCE_ID"
 
-      # 6. Get DATABASE_URL from SSM (RDS)
-      - name: Get DATABASE_URL from SSM
-        id: get-database-url
+      # 6. Get DATABASE_URL, S3_LOGS_BUCKET from SSM
+      - name: Get SSM parameters
+        id: get-ssm
         run: |
-          PARAM_NAME="/donkey/DATABASE_URL"
-          DATABASE_URL=$(aws ssm get-parameter --name "$PARAM_NAME" --with-decryption --query Parameter.Value --output text 2>/dev/null || true)
-          if [ -n "$DATABASE_URL" ]; then
-            echo "database_url<<EOF" >> $GITHUB_OUTPUT
-            echo "$DATABASE_URL" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "database_url=" >> $GITHUB_OUTPUT
-          fi
+          DATABASE_URL=$(aws ssm get-parameter --name "/donkey/DATABASE_URL" --with-decryption --query Parameter.Value --output text 2>/dev/null || true)
+          S3_LOGS_BUCKET=$(aws ssm get-parameter --name "/donkey/S3_LOGS_BUCKET" --query Parameter.Value --output text 2>/dev/null || true)
+          echo "database_url<<EOF" >> $GITHUB_OUTPUT
+          echo "$DATABASE_URL" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "s3_logs_bucket=$S3_LOGS_BUCKET" >> $GITHUB_OUTPUT
 
       # 7. Deploy to EC2 via SSM
       - name: Deploy to EC2
@@ -78,13 +75,15 @@ jobs:
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
           INSTANCE_ID: ${{ steps.get-instance.outputs.instance_id }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
-          DATABASE_URL: ${{ steps.get-database-url.outputs.database_url }}
+          DATABASE_URL: ${{ steps.get-ssm.outputs.database_url }}
+          S3_LOGS_BUCKET: ${{ steps.get-ssm.outputs.s3_logs_bucket }}
         run: |
           # Build commands JSON array using jq for proper escaping
           COMMANDS=$(jq -n \
             --arg ecr "$ECR_REGISTRY" \
             --arg envfile "$ENV_FILE" \
             --arg dburl "$DATABASE_URL" \
+            --arg s3bucket "$S3_LOGS_BUCKET" \
             '[
               "set -e",
               "echo Starting deployment...",
@@ -95,6 +94,7 @@ jobs:
               "docker rm donkey-api 2>/dev/null || true",
               "echo " + ($envfile | @sh) + " > /home/ec2-user/.env",
               (if ($dburl | length) > 0 then "echo DATABASE_URL=" + ($dburl | @sh) + " >> /home/ec2-user/.env" else empty end),
+              (if ($s3bucket | length) > 0 then "echo S3_LOGS_BUCKET=" + ($s3bucket | @sh) + " >> /home/ec2-user/.env" else empty end),
               "if ! docker ps -a --format \"{{.Names}}\" | grep -qx donkey-redis; then docker run -d --name donkey-redis --restart unless-stopped --network donkey-net redis:7-alpine; elif ! docker ps | grep -q donkey-redis; then docker start donkey-redis; fi",
               "docker network connect donkey-net donkey-redis 2>/dev/null || true",
               "docker run -d --name donkey-api --restart unless-stopped --network donkey-net --link donkey-redis:redis --env-file /home/ec2-user/.env " + $ecr + "/donkey:latest",
