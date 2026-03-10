@@ -14,6 +14,7 @@ from app.db.repository import (
     create_inquiry_reply,
     delete_inquiry,
     get_admin_user_by_user_id,
+    update_inquiry,
     get_dashboard_stats,
     get_distinct_projects,
     get_errors_by_period,
@@ -22,7 +23,6 @@ from app.db.repository import (
     get_request_detail_by_job_id,
     get_requests_list,
     get_usage_by_period,
-    update_inquiry_status,
 )
 from app.db.session import get_session
 from app.schemas.error import ERROR_401, error_response
@@ -48,6 +48,14 @@ class InquiryCreateBody(BaseModel):
 
 class InquiryStatusBody(BaseModel):
     status: str
+
+
+class InquiryUpdateBody(BaseModel):
+    title: str | None = None
+    body: str | None = None
+    status: str | None = None
+    project_id: int | None = None
+    attachment_urls: list[str] | None = None
 
 
 class InquiryReplyBody(BaseModel):
@@ -352,19 +360,20 @@ async def get_inquiry_detail_endpoint(
 
 
 @router.patch("/inquiries/{inquiry_id}")
-async def patch_inquiry_status(
+async def patch_inquiry(
     inquiry_id: int,
-    body: InquiryStatusBody,
+    body: InquiryUpdateBody,
     admin=Depends(get_current_admin),
 ):
-    """문의 상태 변경."""
+    """문의 수정 (title, body, status, project_id, attachment_urls 중 전달된 필드만 변경)."""
     if not is_db_configured():
         raise HTTPException(
             status_code=503,
             detail=error_response("SERVICE_UNAVAILABLE", "DB 연결이 필요합니다."),
         )
+    payload = body.model_dump(exclude_unset=True)
     async with get_session() as session:
-        result = await update_inquiry_status(session, inquiry_id, body.status)
+        result = await update_inquiry(session, inquiry_id, **payload)
     if result is None:
         raise HTTPException(status_code=404, detail=error_response("NOT_FOUND", "해당 문의를 찾을 수 없습니다."))
     return result

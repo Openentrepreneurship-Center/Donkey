@@ -755,6 +755,32 @@ async def update_inquiry_status(
     }
 
 
+async def update_inquiry(
+    session: AsyncSession, inquiry_id: int, **kwargs: str | int | list[str] | None
+) -> dict | None:
+    """문의 수정 (kwargs에 전달된 필드만 업데이트). inquiry 없으면 None."""
+    values: dict = {}
+    if "title" in kwargs:
+        values["title"] = kwargs["title"]
+    if "body" in kwargs:
+        values["body"] = kwargs["body"]
+    if "status" in kwargs and kwargs["status"] in ("pending", "in_progress", "completed"):
+        values["status"] = kwargs["status"]
+    if "project_id" in kwargs:
+        values["project_id"] = kwargs["project_id"]
+    if "attachment_urls" in kwargs:
+        values["attachment_urls"] = kwargs["attachment_urls"]
+    if not values:
+        return await get_inquiry_detail(session, inquiry_id)
+    result = await session.execute(
+        update(Inquiry).where(Inquiry.id == inquiry_id).values(**values)
+    )
+    if result.rowcount == 0:
+        return None
+    await session.flush()
+    return await get_inquiry_detail(session, inquiry_id)
+
+
 async def delete_inquiry(session: AsyncSession, inquiry_id: int) -> bool:
     """문의 삭제. inquiry_reply는 CASCADE. 반환: 삭제됐으면 True, 없었으면 False."""
     result = await session.execute(delete(Inquiry).where(Inquiry.id == inquiry_id))
