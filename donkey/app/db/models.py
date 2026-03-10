@@ -26,6 +26,7 @@ class AdminUser(Base):
         nullable=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    role: Mapped[str | None] = mapped_column(String(32), nullable=True, default="admin")
     created_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST))
     updated_at: Mapped[datetime] = mapped_column(DateTime(6), nullable=False, default=lambda: datetime.now(KST), onupdate=lambda: datetime.now(KST))
 

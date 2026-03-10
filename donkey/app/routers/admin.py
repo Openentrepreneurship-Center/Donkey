@@ -308,6 +308,50 @@ async def create_inquiry_endpoint(
         )
 
 
+def _require_admin_role(admin) -> None:
+    if getattr(admin, "role", None) != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail=error_response("FORBIDDEN", "admin 권한이 필요합니다."),
+        )
+
+
+@router.get("/inquiries/all")
+async def list_all_inquiries(
+    admin=Depends(get_current_admin),
+    page: int = 1,
+    limit: int = 100,
+    status: str | None = None,
+    project_id: int | None = None,
+    q: str | None = None,
+):
+    """모든 문의 조회 (admin 권한만)."""
+    _require_admin_role(admin)
+    if not is_db_configured():
+        return {"items": [], "total": 0}
+    limit = max(1, min(limit, 500))
+    offset = (page - 1) * limit
+    status_filter = status.strip() if status and status.strip() else None
+    try:
+        async with get_session() as session:
+            items, total = await get_inquiries_list(
+                session,
+                limit=limit,
+                offset=offset,
+                status_filter=status_filter,
+                project_id=project_id,
+                q=q,
+            )
+        return {"items": items, "total": total}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=error_response("COMMON_500_000", f"문의 목록 조회 중 오류: {e!s}"),
+        )
+
+
 @router.get("/inquiries")
 async def list_inquiries(
     admin=Depends(get_current_admin),
