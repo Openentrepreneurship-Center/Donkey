@@ -67,8 +67,7 @@ class JobLogger:
         self._start_time = time.time()
         self._stage_start: float | None = None
         settings = get_settings()
-        stt_backend = (settings.stt_backend or "").strip().lower()
-        self.log.model_usage.stt_model = "clova-speech" if stt_backend == "clova" else settings.stt_model
+        self.log.model_usage.stt_model = settings.stt_model
         self.log.model_usage.chat_model = settings.chat_model
 
     def start_stage(self) -> None:

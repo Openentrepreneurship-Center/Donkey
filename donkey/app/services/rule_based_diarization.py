@@ -390,11 +390,11 @@ def _label_turns_by_llm(turns: list[list[dict]], max_chars: int = TURN_PROMPT_MA
     return all_labels
 
 
-def map_clova_speakers_to_roles(
+def map_external_speakers_to_roles(
     segments: list[dict],
 ) -> list[tuple[float, float, str]]:
     """
-    Clova Speech에서 나온 화자 라벨을 의사(1명) / 환자(1명 이상)로 매핑.
+    외부 STT에서 나온 화자 라벨을 의사(1명) / 환자(1명 이상)로 매핑.
     LLM으로 역할 분류 후 SPEAKER_00=의사, SPEAKER_01/02/...=환자 순으로 부여.
     segments: [{"start", "end", "text", "speaker": "1"|"2"|...}, ...]
     Returns: [(start_sec, end_sec, "SPEAKER_00"|"SPEAKER_01"|...), ...] (입력과 동일 순서)
@@ -461,7 +461,7 @@ Respond with JSON only, e.g. {{"1": "doctor", "2": "patient"}}:"""
     except (json.JSONDecodeError, KeyError, Exception):
         role_by_label = {}
 
-    # clova_label -> SPEAKER_00 (의사 1명), SPEAKER_01, SPEAKER_02, ... (환자 순)
+    # raw speaker label -> SPEAKER_00 (의사 1명), SPEAKER_01, SPEAKER_02, ... (환자 순)
     doctor_label: str | None = None
     patient_labels: list[str] = []
     for lab in labels_sorted:
@@ -485,6 +485,8 @@ Respond with JSON only, e.g. {{"1": "doctor", "2": "patient"}}:"""
         sp = label_to_speaker.get(key, "SPEAKER_01")
         out.append((s["start"], s["end"], sp))
     return out
+
+
 
 
 def diarize_from_whisper_segments(

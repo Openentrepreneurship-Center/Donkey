@@ -32,16 +32,20 @@ class Settings(BaseSettings):
     )
 
     # Models
-    stt_model: str = "gpt-4o-mini-transcribe"
+    stt_model: str = "donkey-stt"
     chat_model: str = "gpt-4o-mini"
 
-    # STT 백엔드: whisper | clova (clova 사용 시 아래 CLOVA_* 설정 필요)
-    stt_backend: str = Field(default="whisper", validation_alias="STT_BACKEND")
-    clova_speech_invoke_url: str = Field(default="", validation_alias="CLOVA_SPEECH_INVOKE_URL")
-    clova_speech_api_key: str = Field(default="", validation_alias="CLOVA_SPEECH_API_KEY")
+    # STT는 Donkey API 단일 백엔드로 고정
+    donkey_stt_base_url: str = Field(
+        default="http://api.donkey.ai.kr",
+        validation_alias="DONKEY_STT_BASE_URL",
+    )
+    donkey_stt_timeout_seconds: int = Field(
+        default=300,
+        validation_alias="DONKEY_STT_TIMEOUT_SECONDS",
+    )
 
-    # 화자 분리: Whisper/Clova 구간 + 턴/LLM 또는 오디오 특징 클러스터링 (규칙 기반, CPU만 사용)
-    whisper_segment_model: str = "whisper-1"
+    # 화자 분리: STT 구간 + 턴/LLM 또는 오디오 특징 클러스터링 (규칙 기반, CPU만 사용)
     # True = Resemblyzer 화자 임베딩(가벼움), False = MFCC+피치 기반
     use_resemblyzer_embedding: bool = True
     # True = 오디오 없이 LLM이 구간별 DOCTOR/PATIENT만 붙임 (진료 대화에 유리)

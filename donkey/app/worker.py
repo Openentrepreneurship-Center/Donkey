@@ -20,7 +20,7 @@ from app.services.audio import (
 )
 from app.services.rule_based_diarization import (
     diarize_from_whisper_segments,
-    map_clova_speakers_to_roles,
+    map_external_speakers_to_roles,
 )
 from app.services.transcription import transcribe_with_segments, seconds_to_time_str
 from app.services.summarization import (
@@ -176,7 +176,6 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 whisper_segments = transcribe_with_segments(
                     wav_path,
                     language=settings.default_language,
-                    model=settings.whisper_segment_model,
                 )
             except Exception:
                 whisper_segments = []
@@ -220,7 +219,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 await logger.save_to_s3()
                 return
 
-            # 4. 화자 분리: Clova면 Clova 화자 라벨 → 의사/환자(복수) 매핑, 아니면 Whisper 구간 + 턴/LLM 또는 오디오 클러스터링
+            # 4. 화자 분리: STT가 화자 라벨을 주면 의사/환자(복수)로 매핑,
+            #    아니면 구간 + 턴/LLM 또는 오디오 클러스터링
             valid_segments = [
                 s
                 for s in whisper_segments
@@ -229,13 +229,9 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             ]
             current_stage = "diarization"
             logger.start_stage()
-            use_clova_speakers = (
-                (settings.stt_backend or "").strip().lower() == "clova"
-                and valid_segments
-                and valid_segments[0].get("speaker") is not None
-            )
-            if use_clova_speakers:
-                diarized_segments = map_clova_speakers_to_roles(valid_segments)
+            use_external_speakers = valid_segments and valid_segments[0].get("speaker") is not None
+            if use_external_speakers:
+                diarized_segments = map_external_speakers_to_roles(valid_segments)
             else:
                 diarized_segments = diarize_from_whisper_segments(
                     wav_path,
