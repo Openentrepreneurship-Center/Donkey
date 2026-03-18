@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
 from app.routers import ai, admin
+from app.routers import temp_stt
 from app.schemas.error import (
     error_response,
     ERROR_400,
@@ -68,6 +69,7 @@ app.add_middleware(
 # Include routers
 app.include_router(ai.router)
 app.include_router(admin.router)
+app.include_router(temp_stt.router)
 
 
 @app.exception_handler(RequestValidationError)
