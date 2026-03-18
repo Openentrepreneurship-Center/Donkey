@@ -15,16 +15,11 @@ from urllib.parse import urlparse, urlunparse
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.config import get_settings
 from app.schemas.request import AIRequest
-from app.schemas.response import (
-    AICreateResponse,
-    AICreateBody,
-    AIResponse,
-    AIResultBody,
-    ConsultationSummary,
-)
+from app.schemas.response import AICreateResponse, AICreateBody
 from app.schemas.error import ERROR_404, ERROR_500, error_response
 from app.store.redis import (
     get_job_store,
@@ -34,6 +29,20 @@ from app.store.redis import (
 from app.worker_temp import process_audio_job_temp
 
 logger = logging.getLogger(__name__)
+
+
+class TempSttResultBody(BaseModel):
+    id: str
+    title: str
+    duration: float
+    simpleSummary: str
+
+
+class TempSttResponse(BaseModel):
+    status: str
+    statusCode: int
+    body: TempSttResultBody | None = None
+    message: str | None = None
 
 
 def _run_worker_sync(job_id: str, file_url: str) -> None:
@@ -124,7 +133,7 @@ async def create_temp_stt_job(
 
 @router.get(
     "/{job_id}",
-    response_model=AIResponse,
+    response_model=TempSttResponse,
     response_model_exclude_none=True,
     summary="임시 STT 작업 결과 조회",
     description="임시 STT 처리 작업의 결과를 조회합니다.",
@@ -145,28 +154,11 @@ async def get_temp_stt_result(
         raise HTTPException(status_code=404, detail=error_response(*ERROR_404))
 
     status = job.get("status", "pending")
-    is_generated = job.get("isGenerated", False)
-
-    consultation_summary = None
-    if job.get("consultationSummary"):
-        consultation_summary = ConsultationSummary(**job["consultationSummary"])
-
-    result_body = AIResultBody(
-        id=job_id,
-        title=job.get("title", ""),
-        duration=job.get("duration", 0),
-        isGenerated=is_generated,
-        isAbusing=job.get("isAbusing", False),
-        abusingReason=job.get("abusingReason", ""),
-        simpleSummary=job.get("simpleSummary", ""),
-        consultationSummary=consultation_summary,
-    )
 
     if status == "pending" or status == "processing":
-        payload = AIResponse(
+        payload = TempSttResponse(
             status="ok",
             statusCode=202,
-            body=None,
             message="AI 실행 결과가 진행 중",
         ).model_dump(exclude_none=True)
         return JSONResponse(content=payload, status_code=202)
@@ -178,7 +170,13 @@ async def get_temp_stt_result(
             content=error_response(code, message),
         )
     else:  # completed
-        return AIResponse(
+        result_body = TempSttResultBody(
+            id=job_id,
+            title=job.get("title", ""),
+            duration=job.get("duration", 0),
+            simpleSummary=job.get("simpleSummary", ""),
+        )
+        return TempSttResponse(
             status="ok",
             statusCode=200,
             body=result_body,
