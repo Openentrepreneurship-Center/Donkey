@@ -25,11 +25,14 @@ from app.store.redis import get_job_store
 logger = logging.getLogger(__name__)
 
 CLIENT_ERROR_MESSAGE = "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
-DONKEY_STT_API_URL = "http://api.donkey.ai.kr/transcribe"
+DONKEY_STT_API_URL = "http://163.239.108.20/transcribe"
+DONKEY_STT_API_HOST = "api.donkey.ai.kr"
 
 
 def _transcribe_via_donkey_api(file_url: str, language: str = "ko") -> list[dict]:
     """http://api.donkey.ai.kr/transcribe 를 통해 STT 전사 (URL 기반).
+
+    iptime 국가 차단 우회를 위해 IP로 직접 요청하고 Host 헤더를 명시합니다.
 
     응답 형식:
         {
@@ -37,7 +40,7 @@ def _transcribe_via_donkey_api(file_url: str, language: str = "ko") -> list[dict
             "full_text": str
         }
     """
-    with httpx.Client(timeout=600.0) as client:
+    with httpx.Client(timeout=600.0, headers={"Host": DONKEY_STT_API_HOST}) as client:
         resp = client.post(
             DONKEY_STT_API_URL,
             json={"url": file_url, "language": language},
