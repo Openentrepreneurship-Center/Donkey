@@ -19,7 +19,6 @@ from app.services.pii_filter import filter_pii_with_screening
 from app.services.rule_based_diarization import map_clova_speakers_to_roles
 from app.services.slack import notify_slack
 from app.services.transcription import seconds_to_time_str
-from app.services.validation import validate_medical_conversation
 from app.store.redis import get_job_store
 
 logger = logging.getLogger(__name__)
@@ -235,39 +234,7 @@ async def process_audio_job_temp(job_id: str, file_url: str) -> None:
 
         diarized_text = "\n".join(diarized_lines)
 
-        # 3. 진료 대화 유효성 검사
-        current_stage = "validation"
-        logger_inst.start_stage()
-        is_valid, abuse_reason = await asyncio.to_thread(
-            validate_medical_conversation,
-            diarized_text,
-            settings.chat_model,
-        )
-        logger_inst.end_stage("validation_time_ms")
-
-        if not is_valid:
-            logger_inst.set_quality(
-                is_abusing=True,
-                abusing_reason=abuse_reason or "진료 대화가 아님",
-            )
-            await store.update_job(job_id, {
-                "status": "completed",
-                "isGenerated": True,
-                "isAbusing": True,
-                "abusingReason": abuse_reason or "진료 대화가 아님",
-                "isScreening": False,
-                "screeningReason": "해당되는 내용 없음.",
-                "screening": {"names": [], "phones": []},
-                "duration": duration,
-                "title": "",
-                "simpleSummary": "",
-                "consultationSummary": None,
-            })
-            logger_inst.complete("completed")
-            await logger_inst.save_to_s3()
-            return
-
-        # 4. 개인정보 필터링
+        # 3. 개인정보 필터링
         current_stage = "pii_filter"
         logger_inst.start_stage()
         filtered_text, screening_data = filter_pii_with_screening(diarized_text)
