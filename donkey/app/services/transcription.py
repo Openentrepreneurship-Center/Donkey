@@ -90,6 +90,79 @@ def _transcribe_with_clova(
     return out
 
 
+def _transcribe_with_donkey_file(
+    wav_path: str | Path,
+    language: str = "ko",
+) -> list[dict]:
+    """온프레미스 Whisper STT API(/transcribe/file)로 파일 업로드 방식 전사.
+
+    IP 직접 호출 + Host 헤더로 iptime 국가 차단 우회.
+    Returns list of {"start": float, "end": float, "text": str, "speaker": str (optional)}.
+    """
+    settings = get_settings()
+    api_url = (settings.donkey_stt_api_url or "").rstrip("/") + "/transcribe/file"
+    api_host = settings.donkey_stt_api_host or ""
+
+    path = Path(wav_path)
+    headers = {"Host": api_host} if api_host else {}
+    with path.open("rb") as f:
+        with httpx.Client(timeout=600.0, headers=headers) as client:
+            resp = client.post(
+                api_url,
+                files={"file": (path.name, f, "audio/wav")},
+                data={"language": language},
+            )
+    resp.raise_for_status()
+    body = resp.json()
+
+    out: list[dict] = []
+    for seg in (body.get("segments") or []):
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        item: dict = {
+            "start": float(seg.get("start") or 0),
+            "end": float(seg.get("end") or 0),
+            "text": text,
+        }
+        if seg.get("speaker"):
+            item["speaker"] = str(seg["speaker"])
+        out.append(item)
+    return out
+
+
+def transcribe_with_url(file_url: str, language: str = "ko") -> list[dict]:
+    """온프레미스 Whisper STT API로 URL 기반 전사 (worker_temp 전용).
+
+    IP 직접 호출 + Host 헤더로 iptime 국가 차단 우회.
+    Returns list of {"start": float, "end": float, "text": str, "speaker": str (optional)}.
+    """
+    settings = get_settings()
+    api_url = (settings.donkey_stt_api_url or "").rstrip("/") + "/transcribe"
+    api_host = settings.donkey_stt_api_host or ""
+
+    headers = {"Host": api_host} if api_host else {}
+    with httpx.Client(timeout=600.0, headers=headers) as client:
+        resp = client.post(api_url, json={"url": file_url, "language": language})
+        resp.raise_for_status()
+        body = resp.json()
+
+    out: list[dict] = []
+    for seg in (body.get("segments") or []):
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        item: dict = {
+            "start": float(seg.get("start") or 0),
+            "end": float(seg.get("end") or 0),
+            "text": text,
+        }
+        if seg.get("speaker"):
+            item["speaker"] = str(seg["speaker"])
+        out.append(item)
+    return out
+
+
 def transcribe_with_segments(
     wav_path: str | Path,
     language: str = "ko",
@@ -101,8 +174,11 @@ def transcribe_with_segments(
     Returns list of {"start": float, "end": float, "text": str}.
     """
     settings = get_settings()
-    if (settings.stt_backend or "").strip().lower() == "clova":
+    backend = (settings.stt_backend or "").strip().lower()
+    if backend == "clova":
         return _transcribe_with_clova(wav_path, language=language)
+    if backend == "donkey":
+        return _transcribe_with_donkey_file(wav_path, language=language)
 
     # Whisper
     client = get_openai_client()

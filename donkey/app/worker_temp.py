@@ -10,7 +10,6 @@ import logging
 import time
 import traceback
 
-import httpx
 from openai import OpenAI
 
 from app.config import get_settings
@@ -18,51 +17,12 @@ from app.services.job_logger import JobLogger
 from app.services.pii_filter import filter_pii_with_screening
 from app.services.rule_based_diarization import map_clova_speakers_to_roles
 from app.services.slack import notify_slack
-from app.services.transcription import seconds_to_time_str
+from app.services.transcription import seconds_to_time_str, transcribe_with_url
 from app.store.redis import get_job_store
 
 logger = logging.getLogger(__name__)
 
 CLIENT_ERROR_MESSAGE = "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
-DONKEY_STT_API_URL = "http://163.239.108.20/transcribe"
-DONKEY_STT_API_HOST = "api.donkey.ai.kr"
-
-
-def _transcribe_via_donkey_api(file_url: str, language: str = "ko") -> list[dict]:
-    """http://api.donkey.ai.kr/transcribe 를 통해 STT 전사 (URL 기반).
-
-    iptime 국가 차단 우회를 위해 IP로 직접 요청하고 Host 헤더를 명시합니다.
-
-    응답 형식:
-        {
-            "segments": [{"start": float, "end": float, "text": str, "speaker": str}, ...],
-            "full_text": str
-        }
-    """
-    with httpx.Client(timeout=600.0, headers={"Host": DONKEY_STT_API_HOST}) as client:
-        resp = client.post(
-            DONKEY_STT_API_URL,
-            json={"url": file_url, "language": language},
-        )
-        resp.raise_for_status()
-        body = resp.json()
-
-    segments_raw = body.get("segments") or []
-    out: list[dict] = []
-    for seg in segments_raw:
-        text = (seg.get("text") or "").strip()
-        if not text:
-            continue
-        item: dict = {
-            "start": float(seg.get("start") or 0),
-            "end": float(seg.get("end") or 0),
-            "text": text,
-        }
-        speaker = seg.get("speaker")
-        if speaker:
-            item["speaker"] = str(speaker)
-        out.append(item)
-    return out
 
 
 def _generate_title(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
@@ -150,7 +110,7 @@ async def process_audio_job_temp(job_id: str, file_url: str) -> None:
         current_stage = "transcription"
         logger_inst.start_stage()
         whisper_segments = await asyncio.to_thread(
-            _transcribe_via_donkey_api,
+            transcribe_with_url,
             file_url,
             settings.default_language,
         )

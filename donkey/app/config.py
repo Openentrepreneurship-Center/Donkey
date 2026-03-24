@@ -35,10 +35,13 @@ class Settings(BaseSettings):
     stt_model: str = "gpt-4o-mini-transcribe"
     chat_model: str = "gpt-4o-mini"
 
-    # STT 백엔드: whisper | clova (clova 사용 시 아래 CLOVA_* 설정 필요)
-    stt_backend: str = Field(default="whisper", validation_alias="STT_BACKEND")
+    # STT 백엔드: whisper | clova | donkey
+    stt_backend: str = Field(default="donkey", validation_alias="STT_BACKEND")
     clova_speech_invoke_url: str = Field(default="", validation_alias="CLOVA_SPEECH_INVOKE_URL")
     clova_speech_api_key: str = Field(default="", validation_alias="CLOVA_SPEECH_API_KEY")
+    # donkey 백엔드: 온프레미스 Whisper API (IP 직접 + Host 헤더로 iptime 국가 차단 우회)
+    donkey_stt_api_url: str = Field(default="http://163.239.108.20", validation_alias="DONKEY_STT_API_URL")
+    donkey_stt_api_host: str = Field(default="api.donkey.ai.kr", validation_alias="DONKEY_STT_API_HOST")
 
     # 화자 분리: Whisper/Clova 구간 + 턴/LLM 또는 오디오 특징 클러스터링 (규칙 기반, CPU만 사용)
     whisper_segment_model: str = "whisper-1"
