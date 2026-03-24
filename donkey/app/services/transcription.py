@@ -174,11 +174,12 @@ def transcribe_with_segments(
     Returns list of {"start": float, "end": float, "text": str}.
     """
     settings = get_settings()
+    return _transcribe_with_donkey_file(wav_path, language=language)
+
+    # 아래는 레거시 (clova/whisper) — 현재 미사용
     backend = (settings.stt_backend or "").strip().lower()
     if backend == "clova":
         return _transcribe_with_clova(wav_path, language=language)
-    if backend == "donkey":
-        return _transcribe_with_donkey_file(wav_path, language=language)
 
     # Whisper
     client = get_openai_client()
