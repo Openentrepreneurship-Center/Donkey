@@ -138,7 +138,7 @@ def transcribe_with_url(file_url: str, language: str = "ko") -> list[dict]:
     Returns list of {"start": float, "end": float, "text": str, "speaker": str (optional)}.
     """
     settings = get_settings()
-    api_url = (settings.donkey_stt_api_url or "").rstrip("/") + "/transcribe"
+    api_url = (settings.donkey_stt_api_url or "").rstrip("/") + "/transcribe/temp"
     api_host = settings.donkey_stt_api_host or ""
 
     headers = {"Host": api_host} if api_host else {}
