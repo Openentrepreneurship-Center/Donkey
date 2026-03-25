@@ -2,6 +2,7 @@ import json
 import tempfile
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import httpx
 from openai import OpenAI
@@ -90,34 +91,30 @@ def _transcribe_with_clova(
     return out
 
 
-def _transcribe_with_donkey_file(
-    wav_path: str | Path,
-    language: str = "ko",
-) -> list[dict]:
-    """온프레미스 Whisper STT API(/transcribe/file)로 파일 업로드 방식 전사.
-
-    IP 직접 호출 + Host 헤더로 iptime 국가 차단 우회.
-    Returns list of {"start": float, "end": float, "text": str, "speaker": str (optional)}.
-    """
-    settings = get_settings()
-    api_url = (settings.donkey_stt_api_url or "").rstrip("/") + "/transcribe/file"
-    api_host = settings.donkey_stt_api_host or ""
-
-    path = Path(wav_path)
-    headers = {"Host": api_host} if api_host else {}
-    with path.open("rb") as f:
-        with httpx.Client(timeout=600.0, headers=headers) as client:
-            resp = client.post(
-                api_url,
-                files={"file": (path.name, f, "audio/wav")},
-                data={"language": language},
-            )
-    resp.raise_for_status()
-    body = resp.json()
-
+def _segments_from_donkey_response(body: Any) -> list[dict]:
+    """Donkey STT 응답을 내부 구간 리스트로 정규화."""
     out: list[dict] = []
-    for seg in (body.get("segments") or []):
-        text = (seg.get("text") or "").strip()
+
+    # 신규 포맷: 응답 본문이 배열이며 항목은 {role, index, content}
+    if isinstance(body, list):
+        for seg in body:
+            if not isinstance(seg, dict):
+                continue
+            text = (seg.get("content") or "").strip()
+            if not text:
+                continue
+            item: dict = {"text": text}
+            if seg.get("role"):
+                item["role"] = str(seg["role"])
+            if seg.get("index") is not None:
+                item["index"] = int(seg["index"])
+            out.append(item)
+        return out
+
+    # 기존 포맷: { segments: [ {start, end, text, speaker?}, ... ] }
+    segments = body.get("segments") if isinstance(body, dict) else []
+    for seg in (segments or []):
+        text = (seg.get("text") or seg.get("content") or "").strip()
         if not text:
             continue
         item: dict = {
@@ -129,6 +126,23 @@ def _transcribe_with_donkey_file(
             item["speaker"] = str(seg["speaker"])
         out.append(item)
     return out
+
+
+def _transcribe_with_donkey_url(file_url: str) -> list[dict]:
+    """온프레미스 STT API: 입력으로 받은 오디오 URL을 그대로 JSON으로 전달.
+
+    POST /transcribe/clova-note, body: {"url": "<클라이언트 file URL>"}
+    IP 직접 호출 + Host 헤더로 iptime 국가 차단 우회.
+    """
+    settings = get_settings()
+    api_url = (settings.donkey_stt_api_url or "").rstrip("/") + "/transcribe/clova-note"
+    api_host = settings.donkey_stt_api_host or ""
+
+    headers = {"Host": api_host} if api_host else {}
+    with httpx.Client(timeout=600.0, headers=headers) as client:
+        resp = client.post(api_url, json={"url": file_url})
+    resp.raise_for_status()
+    return _segments_from_donkey_response(resp.json())
 
 
 def transcribe_with_url(file_url: str, language: str = "ko") -> list[dict]:
@@ -147,62 +161,22 @@ def transcribe_with_url(file_url: str, language: str = "ko") -> list[dict]:
         resp.raise_for_status()
         body = resp.json()
 
-    out: list[dict] = []
-    for seg in (body.get("segments") or []):
-        text = (seg.get("text") or "").strip()
-        if not text:
-            continue
-        item: dict = {
-            "start": float(seg.get("start") or 0),
-            "end": float(seg.get("end") or 0),
-            "text": text,
-        }
-        if seg.get("speaker"):
-            item["speaker"] = str(seg["speaker"])
-        out.append(item)
-    return out
+    return _segments_from_donkey_response(body)
 
 
 def transcribe_with_segments(
-    wav_path: str | Path,
+    file_url: str,
     language: str = "ko",
     model: str = "whisper-1",
 ) -> list[dict]:
     """
-    설정(stt_backend)에 따라 Whisper 또는 CLOVA Speech로 전사.
+    Donkey STT: 클라이언트가 제출한 오디오 URL을 그대로 전달해 전사.
     구간별 타임스탬프(시작/끝)와 텍스트를 반환.
+    language/model은 호환용 인자(STT API는 현재 url만 사용).
     Returns list of {"start": float, "end": float, "text": str}.
     """
-    settings = get_settings()
-    return _transcribe_with_donkey_file(wav_path, language=language)
-
-    # 아래는 레거시 (clova/whisper) — 현재 미사용
-    backend = (settings.stt_backend or "").strip().lower()
-    if backend == "clova":
-        return _transcribe_with_clova(wav_path, language=language)
-
-    # Whisper
-    client = get_openai_client()
-    path = Path(wav_path)
-
-    with path.open("rb") as f:
-        result = client.audio.transcriptions.create(
-            model=model,
-            file=f,
-            language=language,
-            response_format="verbose_json",
-            timestamp_granularities=["segment"],
-        )
-
-    segments = getattr(result, "segments", None) or []
-    out: list[dict] = []
-    for seg in segments:
-        start = float(getattr(seg, "start", 0) or 0)
-        end = float(getattr(seg, "end", 0) or 0)
-        text = (getattr(seg, "text", None) or "").strip()
-        if text:
-            out.append({"start": start, "end": end, "text": text})
-    return out
+    _ = language, model
+    return _transcribe_with_donkey_url(file_url)
 
 
 def transcribe_segment(

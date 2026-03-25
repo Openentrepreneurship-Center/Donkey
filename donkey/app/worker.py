@@ -174,7 +174,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             logger.start_stage()
             try:
                 whisper_segments = transcribe_with_segments(
-                    wav_path,
+                    file_url,
                     language=settings.default_language,
                     model=settings.whisper_segment_model,
                 )
@@ -220,42 +220,58 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 await logger.save_to_s3()
                 return
 
-            # 4. 화자 분리: Clova면 Clova 화자 라벨 → 의사/환자(복수) 매핑, 아니면 Whisper 구간 + 턴/LLM 또는 오디오 클러스터링
-            valid_segments = [
-                s
-                for s in whisper_segments
-                if (s["end"] - s["start"]) >= settings.min_segment_duration
-                and (s.get("text") or "").strip()
-            ]
+            # 4. 화자 처리
+            # - 신규 STT 포맷(role/index/content): STT 라벨을 그대로 사용 (별도 diarization 생략)
+            # - 기존 포맷(start/end/text): 기존 diarization 로직 유지
             current_stage = "diarization"
             logger.start_stage()
-            use_clova_speakers = (
-                (settings.stt_backend or "").strip().lower() == "clova"
-                and valid_segments
-                and valid_segments[0].get("speaker") is not None
-            )
-            if use_clova_speakers:
-                diarized_segments = map_clova_speakers_to_roles(valid_segments)
+            use_role_labeled_segments = bool(whisper_segments and whisper_segments[0].get("role"))
+            if use_role_labeled_segments:
+                role_segments = [
+                    s for s in whisper_segments
+                    if (s.get("text") or "").strip()
+                ]
+                role_segments.sort(key=lambda s: int(s.get("index") or 0))
+                diarized_lines = []
+                for seg in role_segments:
+                    role = str(seg.get("role") or "UNKNOWN")
+                    text = (seg.get("text") or "").strip()
+                    if text:
+                        diarized_lines.append(f"[{role}] {text}")
+                unique_speakers = {str(s.get("role") or "UNKNOWN") for s in role_segments}
             else:
-                diarized_segments = diarize_from_whisper_segments(
-                    wav_path,
-                    whisper_segments,
-                    min_segment_duration=settings.min_segment_duration,
+                valid_segments = [
+                    s
+                    for s in whisper_segments
+                    if (s["end"] - s["start"]) >= settings.min_segment_duration
+                    and (s.get("text") or "").strip()
+                ]
+                use_clova_speakers = (
+                    (settings.stt_backend or "").strip().lower() == "clova"
+                    and valid_segments
+                    and valid_segments[0].get("speaker") is not None
                 )
+                if use_clova_speakers:
+                    diarized_segments = map_clova_speakers_to_roles(valid_segments)
+                else:
+                    diarized_segments = diarize_from_whisper_segments(
+                        wav_path,
+                        whisper_segments,
+                        min_segment_duration=settings.min_segment_duration,
+                    )
+                unique_speakers = set(seg[2] for seg in diarized_segments)
+                # 구간과 화자 라벨 매칭 (같은 순서)
+                diarized_lines = []
+                for seg, (start, end, speaker) in zip(valid_segments, diarized_segments):
+                    text = (seg.get("text") or "").strip()
+                    if text:
+                        line = f"[{speaker}] {seconds_to_time_str(start)}–{seconds_to_time_str(end)}: {text}"
+                        diarized_lines.append(line)
             logger.end_stage("diarization_time_ms")
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return
 
-            unique_speakers = set(seg[2] for seg in diarized_segments)
             logger.set_quality(speaker_count=len(unique_speakers))
-
-            # 구간과 화자 라벨 매칭 (같은 순서)
-            diarized_lines = []
-            for seg, (start, end, speaker) in zip(valid_segments, diarized_segments):
-                text = (seg.get("text") or "").strip()
-                if text:
-                    line = f"[{speaker}] {seconds_to_time_str(start)}–{seconds_to_time_str(end)}: {text}"
-                    diarized_lines.append(line)
             logger.set_quality(segment_count=len(diarized_lines))
 
             if not diarized_lines:
