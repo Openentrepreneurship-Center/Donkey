@@ -210,18 +210,32 @@ def parse_soap_to_consultation_summary(
     # Parse conversation content from diarized lines
     conversation_content = []
     for idx, line in enumerate(diarized_lines):
-        # Parse format: [Speaker_0] 00:12.3–00:28.5: 텍스트
-        match = re.match(r"\[([^\]]+)\]\s*[\d:.\-–]+:\s*(.+)", line)
-        if match:
-            speaker = match.group(1)
-            content = _strip_question_prefix(match.group(2))
-            # SPEAKER_00=의사, SPEAKER_01=환자 (정확히 00만 의사로, 01은 환자)
-            role = "원장님" if speaker == "SPEAKER_00" else "환자"
-            conversation_content.append(ConversationItem(
-                role=role,
-                index=idx,
-                content=content,
-            ))
+        # 1) [Speaker] 00:12.3–00:28.5: 텍스트
+        # 2) [원장님] 텍스트  (신규 STT role 라벨 포맷)
+        match_with_time = re.match(r"\[([^\]]+)\]\s*[\d:.\-–]+:\s*(.+)", line)
+        match_no_time = re.match(r"\[([^\]]+)\]\s*(.+)", line)
+        if not match_with_time and not match_no_time:
+            continue
+
+        match = match_with_time or match_no_time
+        speaker = match.group(1).strip()
+        content = _strip_question_prefix(match.group(2))
+        if not content:
+            continue
+
+        # 기존 내부 화자코드(SPEAKER_00/01)와 신규 role 라벨(원장님/환자) 모두 지원
+        if speaker == "SPEAKER_00":
+            role = "원장님"
+        elif speaker == "SPEAKER_01":
+            role = "환자"
+        else:
+            role = speaker
+
+        conversation_content.append(ConversationItem(
+            role=role,
+            index=idx,
+            content=content,
+        ))
 
     consultation = ConsultationSummary(
         doctorNotes=sections["A"],
