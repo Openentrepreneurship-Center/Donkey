@@ -35,6 +35,7 @@ def _get_engine():
                 pool_pre_ping=True,
                 pool_size=5,
                 max_overflow=10,
+                connect_args={"charset": "utf8mb4"},
             )
         return _engines[key]
 
@@ -82,6 +83,7 @@ async def init_db() -> None:
         pool_pre_ping=True,
         pool_size=1,
         max_overflow=0,
+        connect_args={"charset": "utf8mb4"},
     )
     try:
         async with engine.begin() as conn:
