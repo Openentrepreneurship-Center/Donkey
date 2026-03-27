@@ -20,14 +20,16 @@ def generate_soap_summary(diarized_text: str, chat_model: str = "gpt-4o-mini") -
 
     system = (
         "You are a clinical documentation assistant. "
-        "Summarize the provided Korean medical conversation into SOAP format. "
+        "Convert the provided Korean medical conversation into a structured SOAP note. "
         "Be factual, do not invent details. If unclear, say '불명확/언급 없음'. "
         "Write in Korean. "
         "Use a consistent tone: write each bullet as a complete sentence in reported-speech or documentation style (e.g. '~했다고 했습니다', '~라고 했습니다', '~입니다'). "
         "Do not use telegraphic fragments (e.g. avoid '증상 개선 중' alone; write '환자는 증상이 개선되고 있다고 했습니다' or similar). "
         "For medical terms, use 한글(English) when appropriate (e.g. 혈당(Blood sugar), 비타민 D(Vitamin D)). "
         "Do not include any personal identifiers beyond what is present in the transcript. "
-        "Strictly separate sections: O is findings-only, A is clinical interpretation/risk, P is action/instruction."
+        "Strictly separate sections: O is findings-only, A is clinical interpretation/risk, P is action/instruction. "
+        "Your first priority is information recall, not brevity. Missing medical information is a serious error. "
+        "If medically relevant context makes the output longer, keep it."
     )
 
     user = f"""아래는 진료 대화 전사(화자/시간 포함)입니다.
@@ -40,7 +42,7 @@ SOAP(Subjective, Objective, Assessment, Plan) 형식으로 요약해줘.
 - 각 섹션 내용은 불릿(- 또는 •)으로 시작하는 문장으로 나열. 문장 톤: "~했다고 했습니다", "~라고 했습니다", "~입니다" 같은 전달형/기록형으로 한 문장씩 완결되게 쓸 것. (단순 단어 나열이나 생략형 금지)
 - 전사에 없는 내용은 절대 추가하지 말 것(추측 금지)
 - 모호하면 "불명확" 또는 "언급 없음"으로 표시
-- 진료 핵심(증상/병력/검사/설명/진단 추정/계획)을 우선. 의학 용어는 필요 시 한글(English)로 표기
+- 의료적으로 관련된 대화는 길어지더라도 보존할 것. 핵심만 남기기 위해 맥락을 버리지 말 것. 의학 용어는 필요 시 한글(English)로 표기
 - 질문 문장 앞에 Q. 등 접두사 붙이지 말 것
 
 섹션 배치 엄수 규칙(반드시 준수):
@@ -72,6 +74,13 @@ SOAP(Subjective, Objective, Assessment, Plan) 형식으로 요약해줘.
 - 의사의 설명 중 배경 맥락(왜 그렇게 하는지, 어떤 상황에서 달라지는지)은 축약하지 말고 핵심 문장으로 유지할 것
 - 행정적 안내만 있고 의료적 의미가 없는 문장(순수 서명 위치 안내 등)만 제외 가능
 - 애매하면 제외하지 말고 해당 섹션에 보수적으로 포함할 것
+- 환자가 진료 후 기억해야 하거나 동의해야 하는 설명은 모두 핵심 의료 정보로 간주할 것
+- 따라서 위험 고지, 예외 상황, 담당 변경 가능성, 추적 필요성, 일반적 경과 설명은 누락 없이 포함할 것
+
+핵심 발화 주변 맥락 규칙:
+- 핵심 의료 발화를 요약할 때, 직전/직후 인접 발화에서 의료적으로 연결되는 질문·확인·조건 설명을 함께 반영할 것
+- 설명-질문-답변이 연속되는 경우, 맥락이 끊기지 않도록 가능한 한 함께 보존할 것
+- 관련성 기준: 원인-결과, 위험-대응, 설명-질문, 지시-확인 관계
 
 의사 설명 포괄성 규칙(범용, 필수):
 - 의사 발화에서 아래 범주는 누락 없이 각각 불릿으로 반영할 것:
@@ -80,12 +89,51 @@ SOAP(Subjective, Objective, Assessment, Plan) 형식으로 요약해줘.
   3) 예외/조건부 분기(예: 종양이 큰 경우, 손상 시, 악화 시)
   4) 추가 처치 가능성(수혈, 스텐트, 추가 수술, 대체 집도의 등)
   5) 재발/예후/추적 필요성(재발률, 외래 추적, 정기검사)
+  6) 일반적 경과/예상 반응/회복 과정(예: 일정 기간 발열 가능, 일시적 장애 후 회복 가능)
 - 위 범주가 전사에 존재하면 절대 생략하지 말고, 항목별로 분리해 기록할 것
 - 한 불릿에 여러 위험요소를 묶지 말고 위험요소별로 분리할 것
+- '가능성/될 수 있음/경우에는/불가피 시/보통 ~일' 같은 조건형 문장은 반드시 보존할 것
+- 조건형 문장, 예외 조항, 대체 담당 가능성, 일반적인 수술 후 경과는 "부가 설명"이 아니라 독립 의료 정보로 취급할 것
+- 따라서 짧더라도, 핵심 사건에 종속된 부속 문장처럼 보여도, 별도 불릿으로 남길 것
+
+문장 분해 규칙:
+- 한 불릿에는 하나의 행동/사실만 작성할 것
+- 하나의 원문 문장에 둘 이상의 행동이 있으면 반드시 불릿을 분리할 것
+  예) "소변줄 끼고 보통 다음 날쯤 뺍니다" →
+      1) "의사는 소변줄을 삽입한다고 설명했습니다."
+      2) "의사는 소변줄을 보통 다음 날 제거한다고 설명했습니다."
+- "~고", "~며", "~하면서", "~후" 등으로 연결된 복합문은 가능한 한 독립 문장으로 분해할 것
 
 출력 전 자기검증(내부적으로 수행):
 - 작성 후, 의사 발화의 핵심 항목이 누락되지 않았는지 점검하고 누락된 항목을 보완한 뒤 최종 출력할 것
 - 특히 '가능성/될 수 있음/경우에는/불가피 시' 같은 조건형 문장을 빠뜨리지 말 것
+
+누락 방지 절차(내부적으로 반드시 수행, 출력에는 노출하지 말 것):
+1) 전사에서 의료 정보 단위를 먼저 모두 추출한다.
+2) 추출한 각 정보 단위를 S/O/A/P 중 정확히 하나에 배치한다.
+3) 최종 출력 전에 정보 단위 누락 여부를 역으로 점검한다.
+4) 누락된 정보 단위가 있으면 해당 섹션에 추가한 뒤 출력한다.
+5) 문장을 다듬더라도 의미 단위는 삭제하지 않는다.
+
+정보 추출 우선 규칙:
+- 먼저 전사에서 의료 정보 단위를 가능한 한 잘게 쪼개 추출한 뒤 SOAP로 재배치할 것
+- 하나의 긴 발화 안에 여러 의료 사실이 있으면 각 사실을 별도 항목으로 모두 보존할 것
+- 특히 아래와 같은 문장은 길거나 부수적이어 보여도 절대 버리지 말 것:
+  - 위험/합병증 설명
+  - 조건부 가능성 설명("~할 수 있음", "~경우에는")
+  - 시술/수술 중 또는 이후 발생 가능한 예외 상황
+  - 추적 관찰, 재발, 외래 방문 필요성
+  - 환자의 질문에 대한 구체적 답변
+- 어떤 의료 정보가 다른 더 큰 문장 안에 포함돼 있더라도, 그 정보는 독립적으로 살아남아야 한다.
+- 요약이 길어져도 괜찮으니, 의료적으로 의미 있는 정보는 누락하지 말 것.
+- 문장이 불완전하거나 끝이 잘린 경우라도, 그 안에 의료적으로 의미 있는 정보가 있으면 버리지 말 것
+- 불완전한 절(clause) 안에 의료용어, 시술명, 검사명, 약물명, 합병증, 위험, 조건, 시점 정보가 있으면 독립적인 정보 단위로 간주할 것
+- 불완전 문장은 의미를 추가로 추론하지 말고, 원문 의미를 유지하는 최소한의 문장 정리만 해서 보존할 것
+- 즉, 문장 완성도보다 의료 정보 보존을 우선할 것
+- 의료와 관련된 문장은 완전한 문장이 아니어도 추출 대상에서 제외하지 말 것
+- ASR 오류, 말줄임, 끊긴 문장, 조사 누락이 있어도 의료 의미가 있으면 반드시 포함할 것
+- 특히 위험, 합병증, 가능성, 일정, 처치, 예외 상황, 추적 계획을 담은 절은 불완전해도 무조건 보존할 것
+- 시간 범위(예: 며칠, 다음 날, 모레, 일정 기간), 조건절(예: ~하면, ~경우), 예외 담당자/대체 절차 언급은 빠뜨리지 말 것
 
 [전사]
 {diarized_text}
