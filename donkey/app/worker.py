@@ -310,8 +310,28 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return
 
-            is_abusing = not is_valid
-            abusing_reason = (abuse_reason or "진료 대화가 아님") if is_abusing else ""
+            if not is_valid:
+                logger.set_quality(
+                    is_abusing=True,
+                    abusing_reason=abuse_reason or "진료 대화가 아님",
+                )
+                await store.update_job(job_id, {
+                    "status": "completed",
+                    "isGenerated": True,
+                    "isAbusing": True,
+                    "abusingReason": abuse_reason or "진료 대화가 아님",
+                    "isScreening": False,
+                    "screeningReason": "해당되는 내용 없음.",
+                    "screening": {"names": [], "phones": []},
+                    "duration": duration,
+                    "title": "",
+                    "simpleSummary": "",
+                    "consultationSummary": None,
+                })
+                logger.complete("completed")
+                await _persist_consultation_if_configured(store, job_id, logger, stored_audio_url=s3_audio_url)
+                await logger.save_to_s3()
+                return
 
             # 6. Filter PII
             current_stage = "pii_filter"
@@ -340,8 +360,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
 
             # Set final quality metrics
             logger.set_quality(
-                is_abusing=is_abusing,
-                abusing_reason=abusing_reason,
+                is_abusing=False,
+                abusing_reason="",
                 speaker_count=len(unique_speakers),
                 segment_count=len(diarized_lines),
             )
@@ -350,8 +370,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             await store.update_job(job_id, {
                 "status": "completed",
                 "isGenerated": True,
-                "isAbusing": is_abusing,
-                "abusingReason": abusing_reason,
+                "isAbusing": False,
+                "abusingReason": "",
                 "isScreening": is_screening,
                 "screeningReason": screening_reason,
                 "screening": screening,

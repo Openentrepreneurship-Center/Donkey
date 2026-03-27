@@ -61,9 +61,6 @@ donkey/diar/   # 프로젝트 내 가상환경 (이름이 diar)
 tmp/
 temp/
 
-# legacy_clova
-legacy_clova/
-
 # Terraform
 .terraform/
 *.tfstate

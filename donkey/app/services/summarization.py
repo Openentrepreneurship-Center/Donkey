@@ -127,88 +127,6 @@ def parse_soap_to_consultation_summary(
         """질문 접두사 Q. / Q. 제거."""
         return re.sub(r"^Q\.\s*", "", text.strip()).strip()
 
-    def _detect_section(line: str) -> str | None:
-        """SOAP 섹션 헤더를 다양한 포맷(마크다운/약어/한글)에서 감지."""
-        if not line:
-            return None
-
-        # 원문 기준 빠른 감지 (기존 동작 유지)
-        upper_raw = line.upper().strip()
-        if (
-            upper_raw.startswith("SUBJECTIVE")
-            or upper_raw.startswith("S:")
-            or upper_raw.startswith("S ")
-            or upper_raw == "S"
-            or upper_raw == "S."
-        ):
-            return "S"
-        if (
-            upper_raw.startswith("OBJECTIVE")
-            or upper_raw.startswith("O:")
-            or upper_raw.startswith("O ")
-            or upper_raw == "O"
-            or upper_raw == "O."
-        ):
-            return "O"
-        if (
-            upper_raw.startswith("ASSESSMENT")
-            or upper_raw.startswith("A:")
-            or upper_raw.startswith("A ")
-            or upper_raw == "A"
-            or upper_raw == "A."
-        ):
-            return "A"
-        if (
-            upper_raw.startswith("PLAN")
-            or upper_raw.startswith("P:")
-            or upper_raw.startswith("P ")
-            or upper_raw == "P"
-            or upper_raw == "P."
-        ):
-            return "P"
-
-        # 마크다운/특수문자를 제거한 후 재감지
-        normalized = re.sub(r"[*_`#>~\-]+", " ", line).strip()
-        normalized = re.sub(r"\s+", " ", normalized)
-        upper_norm = normalized.upper()
-
-        if (
-            "SUBJECTIVE" in upper_norm
-            or "(S)" in upper_norm
-            or upper_norm.startswith("S:")
-        ):
-            return "S"
-        if (
-            "OBJECTIVE" in upper_norm
-            or "(O)" in upper_norm
-            or upper_norm.startswith("O:")
-        ):
-            return "O"
-        if (
-            "ASSESSMENT" in upper_norm
-            or "(A)" in upper_norm
-            or upper_norm.startswith("A:")
-        ):
-            return "A"
-        if (
-            "PLAN" in upper_norm
-            or "(P)" in upper_norm
-            or upper_norm.startswith("P:")
-        ):
-            return "P"
-
-        # 한글 섹션 헤더
-        if normalized.startswith("주관적"):
-            return "S"
-        if normalized.startswith("객관적"):
-            return "O"
-        if normalized.startswith("평가"):
-            return "A"
-        if normalized.startswith("계획"):
-            return "P"
-
-        return None
-
     # Parse SOAP sections
     sections = {"S": [], "O": [], "A": [], "P": []}
     current_section = None
@@ -218,9 +136,49 @@ def parse_soap_to_consultation_summary(
         if not line:
             continue
 
-        detected = _detect_section(line)
-        if detected:
-            current_section = detected
+        # 마크다운 볼드 헤더: **S (Subjective)** , **O (Objective)** 등
+        if "**" in line:
+            upper = line.upper()
+            if "(SUBJECTIVE)" in upper or upper.strip().startswith("**S "):
+                current_section = "S"
+                continue
+            if "(OBJECTIVE)" in upper or upper.strip().startswith("**O "):
+                current_section = "O"
+                continue
+            if "(ASSESSMENT)" in upper or upper.strip().startswith("**A "):
+                current_section = "A"
+                continue
+            if "(PLAN)" in upper or upper.strip().startswith("**P "):
+                current_section = "P"
+                continue
+
+        # Detect section headers (English, plain)
+        upper = line.upper()
+        if upper.startswith("SUBJECTIVE") or upper.startswith("S:") or upper.startswith("S ") or upper == "S" or (upper == "S."):
+            current_section = "S"
+            continue
+        elif upper.startswith("OBJECTIVE") or upper.startswith("O:") or upper.startswith("O ") or upper == "O" or (upper == "O."):
+            current_section = "O"
+            continue
+        elif upper.startswith("ASSESSMENT") or upper.startswith("A:") or upper.startswith("A ") or upper == "A" or (upper == "A."):
+            current_section = "A"
+            continue
+        elif upper.startswith("PLAN") or upper.startswith("P:") or upper.startswith("P ") or upper == "P" or (upper == "P."):
+            current_section = "P"
+            continue
+
+        # 한글 섹션 헤더 (주관적, 객관적, 평가, 계획)
+        if line.startswith("주관적") or line.startswith("Subjective"):
+            current_section = "S"
+            continue
+        if line.startswith("객관적") or line.startswith("Objective"):
+            current_section = "O"
+            continue
+        if line.startswith("평가") or line.startswith("Assessment"):
+            current_section = "A"
+            continue
+        if line.startswith("계획") or line.startswith("Plan"):
+            current_section = "P"
             continue
 
         # Add content to current section
