@@ -136,19 +136,23 @@ def parse_soap_to_consultation_summary(
         if not line:
             continue
 
-        # 마크다운 볼드 헤더: **S (Subjective)** , **O (Objective)** 등
+        # 마크다운/헤더 문자 제거 후 섹션 헤더 감지
+        normalized = re.sub(r"[*_`#>~\-]+", " ", line).strip()
+        normalized = re.sub(r"\s+", " ", normalized)
+
+        # 마크다운 볼드 헤더: **Subjective (S)** , **Objective (O)** 등
         if "**" in line:
-            upper = line.upper()
-            if "(SUBJECTIVE)" in upper or upper.strip().startswith("**S "):
+            upper = normalized.upper()
+            if "SUBJECTIVE" in upper or upper.startswith("S ") or upper.startswith("S:") or "(S)" in upper:
                 current_section = "S"
                 continue
-            if "(OBJECTIVE)" in upper or upper.strip().startswith("**O "):
+            if "OBJECTIVE" in upper or upper.startswith("O ") or upper.startswith("O:") or "(O)" in upper:
                 current_section = "O"
                 continue
-            if "(ASSESSMENT)" in upper or upper.strip().startswith("**A "):
+            if "ASSESSMENT" in upper or upper.startswith("A ") or upper.startswith("A:") or "(A)" in upper:
                 current_section = "A"
                 continue
-            if "(PLAN)" in upper or upper.strip().startswith("**P "):
+            if "PLAN" in upper or upper.startswith("P ") or upper.startswith("P:") or "(P)" in upper:
                 current_section = "P"
                 continue
 
