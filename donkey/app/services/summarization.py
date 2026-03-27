@@ -26,7 +26,8 @@ def generate_soap_summary(diarized_text: str, chat_model: str = "gpt-4o-mini") -
         "Use a consistent tone: write each bullet as a complete sentence in reported-speech or documentation style (e.g. '~했다고 했습니다', '~라고 했습니다', '~입니다'). "
         "Do not use telegraphic fragments (e.g. avoid '증상 개선 중' alone; write '환자는 증상이 개선되고 있다고 했습니다' or similar). "
         "For medical terms, use 한글(English) when appropriate (e.g. 혈당(Blood sugar), 비타민 D(Vitamin D)). "
-        "Do not include any personal identifiers beyond what is present in the transcript."
+        "Do not include any personal identifiers beyond what is present in the transcript. "
+        "Strictly separate sections: O is findings-only, A is clinical interpretation/risk, P is action/instruction."
     )
 
     user = f"""아래는 진료 대화 전사(화자/시간 포함)입니다.
@@ -41,6 +42,50 @@ SOAP(Subjective, Objective, Assessment, Plan) 형식으로 요약해줘.
 - 모호하면 "불명확" 또는 "언급 없음"으로 표시
 - 진료 핵심(증상/병력/검사/설명/진단 추정/계획)을 우선. 의학 용어는 필요 시 한글(English)로 표기
 - 질문 문장 앞에 Q. 등 접두사 붙이지 말 것
+
+섹션 배치 엄수 규칙(반드시 준수):
+- Subjective(S): 환자 주관 증상/경과/복약 언급/환자 질문만 작성
+- Objective(O): 검사/영상/진찰에서 확인된 객관 소견만 작성 (수치/병변/관찰 결과)
+- Assessment(A): 의사의 임상 판단, 원인 해석, 위험도 설명, 합병증/재발 가능성 설명만 작성
+- Plan(P): 처방, 시술/수술 계획, 수술 후 지시, 외래/추적 계획, 퇴원 계획만 작성
+- 특히 '치료/처방/수술 계획/운동 지시/호흡 지시/퇴원 계획'은 반드시 Plan(P)에만 작성
+- Objective에 치료/처방/지시/계획 문장을 넣지 말 것
+- Assessment에는 실행 지시(복용/시행/방문) 문장을 넣지 말 것
+- 중복 작성 금지: 한 정보는 가장 적절한 섹션 하나에만 배치
+
+압축 금지 규칙(매우 중요):
+- 정보를 합쳐서 한 줄로 축약하지 말고, 임상적으로 다른 사실은 반드시 별도 불릿으로 분리할 것
+- 의사 발화에 포함된 '합병증/위험/예외/조건/수치/일정/주의사항'은 각각 따로 분리해서 기록할 것
+- 한 불릿에 2개 이상의 독립 사건(예: 위험 + 지시 + 일정)을 섞지 말 것
+- 가능하면 전사의 정보 단위를 최대한 보존해 상세히 기록하고, 일반화된 표현(예: '회복 지시함', '추적 필요함')으로 뭉뚱그리지 말 것
+- 문장 정리보다 정보 보존을 우선할 것 (약간 장문이 되더라도 의미 단위를 유지)
+
+세부 작성 가이드:
+- Subjective: 환자 질문/걱정/증상 변화는 각각 분리
+- Objective: 확인된 병변, 수술 소요시간, 객관적 상태는 각각 분리
+- Assessment: 의사의 위험 설명(무기폐/폐렴/혈전/재발률/추가수술 가능성 등)은 각각 분리
+- Plan: 심호흡, 보행, 도뇨관 관리, 외래 추적, 퇴원 일정은 각각 분리
+
+의료 맥락 대화 보존 규칙:
+- 중간 대화라고 생략하지 말고, 의료 판단/치료 선택/동의 과정에 영향을 주는 문장은 포함할 것
+- 환자의 우려, 질문, 이해 확인, 보호자와의 질의응답 중 의료적으로 의미 있는 부분은 반드시 반영할 것
+- 의사의 설명 중 배경 맥락(왜 그렇게 하는지, 어떤 상황에서 달라지는지)은 축약하지 말고 핵심 문장으로 유지할 것
+- 행정적 안내만 있고 의료적 의미가 없는 문장(순수 서명 위치 안내 등)만 제외 가능
+- 애매하면 제외하지 말고 해당 섹션에 보수적으로 포함할 것
+
+의사 설명 포괄성 규칙(범용, 필수):
+- 의사 발화에서 아래 범주는 누락 없이 각각 불릿으로 반영할 것:
+  1) 시술/수술 이유와 근거
+  2) 합병증/부작용/위험(출혈, 감염, 폐합병증, 혈전 등)
+  3) 예외/조건부 분기(예: 종양이 큰 경우, 손상 시, 악화 시)
+  4) 추가 처치 가능성(수혈, 스텐트, 추가 수술, 대체 집도의 등)
+  5) 재발/예후/추적 필요성(재발률, 외래 추적, 정기검사)
+- 위 범주가 전사에 존재하면 절대 생략하지 말고, 항목별로 분리해 기록할 것
+- 한 불릿에 여러 위험요소를 묶지 말고 위험요소별로 분리할 것
+
+출력 전 자기검증(내부적으로 수행):
+- 작성 후, 의사 발화의 핵심 항목이 누락되지 않았는지 점검하고 누락된 항목을 보완한 뒤 최종 출력할 것
+- 특히 '가능성/될 수 있음/경우에는/불가피 시' 같은 조건형 문장을 빠뜨리지 말 것
 
 [전사]
 {diarized_text}
