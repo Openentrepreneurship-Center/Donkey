@@ -1,15 +1,4 @@
-from functools import lru_cache
-
-from openai import OpenAI
-
-from app.config import get_settings
-
-
-@lru_cache(maxsize=1)
-def get_openai_client() -> OpenAI:
-    """Get OpenAI client (cached)."""
-    settings = get_settings()
-    return OpenAI(api_key=settings.openai_api_key)
+from app.services.openai_client import get_openai_client
 
 
 def validate_medical_conversation(

@@ -38,4 +38,20 @@ packages = ["app"]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore::DeprecationWarning:pydub.utils",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/metrics/*"]
+
+[tool.coverage.report]
+fail_under = 0

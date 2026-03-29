@@ -10,9 +10,8 @@ import logging
 import time
 import traceback
 
-from openai import OpenAI
-
 from app.config import get_settings
+from app.services.openai_client import get_openai_client
 from app.services.job_logger import JobLogger
 from app.services.pii_filter import filter_pii_with_screening
 from app.services.rule_based_diarization import map_clova_speakers_to_roles
@@ -27,8 +26,7 @@ CLIENT_ERROR_MESSAGE = "처리 중 오류가 발생했습니다. 잠시 후 다�
 
 def _generate_title(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
     """대화 내용을 바탕으로 보편적인 제목을 생성합니다."""
-    settings = get_settings()
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = get_openai_client()
 
     resp = client.chat.completions.create(
         model=chat_model,
@@ -55,8 +53,7 @@ def _generate_title(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
 
 def _generate_free_summary(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
     """temp용: 강의 내용을 구조화하여 요약합니다 (요청 프롬프트 적용)."""
-    settings = get_settings()
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = get_openai_client()
 
     system = "너는 강의 내용을 구조화하여 요약하는 AI이다."
 

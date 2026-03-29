@@ -1,17 +1,8 @@
 import re
-from functools import lru_cache
-
-from openai import OpenAI
 
 from app.config import get_settings
 from app.schemas.response import ConsultationSummary, ConversationItem
-
-
-@lru_cache(maxsize=1)
-def get_openai_client() -> OpenAI:
-    """Get OpenAI client (cached)."""
-    settings = get_settings()
-    return OpenAI(api_key=settings.openai_api_key)
+from app.services.openai_client import get_openai_client
 
 
 def generate_soap_summary(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:

@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -40,7 +40,11 @@ class Settings(BaseSettings):
     clova_speech_invoke_url: str = Field(default="", validation_alias="CLOVA_SPEECH_INVOKE_URL")
     clova_speech_api_key: str = Field(default="", validation_alias="CLOVA_SPEECH_API_KEY")
     # donkey 백엔드: 온프레미스 Whisper API (IP 직접 + Host 헤더로 iptime 국가 차단 우회)
-    donkey_stt_api_url: str = Field(default="http://163.239.108.20", validation_alias="DONKEY_STT_API_URL")
+    # DONKEY_STT_BASE_URL: 레거시/.env 호환
+    donkey_stt_api_url: str = Field(
+        default="http://163.239.108.20",
+        validation_alias=AliasChoices("DONKEY_STT_API_URL", "DONKEY_STT_BASE_URL"),
+    )
     donkey_stt_api_host: str = Field(default="api.donkey.ai.kr", validation_alias="DONKEY_STT_API_HOST")
 
     # 화자 분리: Whisper/Clova 구간 + 턴/LLM 또는 오디오 특징 클러스터링 (규칙 기반, CPU만 사용)

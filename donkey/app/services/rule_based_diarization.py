@@ -36,11 +36,11 @@ from pathlib import Path
 
 import librosa
 import numpy as np
-from openai import OpenAI
 from scipy.sparse import csr_matrix
 from sklearn.cluster import AgglomerativeClustering
 
 from app.config import get_settings
+from app.services.openai_client import get_openai_client
 from app.services.transcription import seconds_to_time_str
 
 try:
@@ -185,11 +185,6 @@ def _turns_from_labels(labels: np.ndarray) -> list[tuple[int, int]]:
     return ranges
 
 
-def _get_openai_client() -> OpenAI:
-    settings = get_settings()
-    return OpenAI(api_key=settings.openai_api_key)
-
-
 def classify_roles_with_llm(cluster_0_text: str, cluster_1_text: str) -> dict[str, str]:
     """
     Text-based role classification. LLM decides which cluster is DOCTOR vs PATIENT
@@ -197,7 +192,7 @@ def classify_roles_with_llm(cluster_0_text: str, cluster_1_text: str) -> dict[st
     Returns {"cluster_0_role": "DOCTOR"|"PATIENT", "cluster_1_role": "DOCTOR"|"PATIENT"}.
     """
     settings = get_settings()
-    client = _get_openai_client()
+    client = get_openai_client()
 
     system = (
         "You are a classifier for medical consultation transcripts. "
@@ -333,7 +328,7 @@ def _label_turns_by_llm(turns: list[list[dict]], max_chars: int = TURN_PROMPT_MA
     Returns list of "SPEAKER_00" or "SPEAKER_01" per turn.
     """
     settings = get_settings()
-    client = _get_openai_client()
+    client = get_openai_client()
     all_labels = []
 
     for chunk_start in range(0, len(turns), TURNS_PER_LLM_CALL):
@@ -433,7 +428,7 @@ def map_clova_speakers_to_roles(
     transcript_blob = "\n\n".join(transcript_parts)[:12000]
 
     settings = get_settings()
-    client = _get_openai_client()
+    client = get_openai_client()
     system = (
         "You are a classifier for Korean medical consultation transcripts. "
         "Each 'Speaker N' is one person. Exactly one speaker is the doctor (의사). "

@@ -1,14 +1,16 @@
 import json
+import logging
 import tempfile
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import httpx
-from openai import OpenAI
 from pydub import AudioSegment
 
 from app.config import get_settings
+from app.services.openai_client import get_openai_client
+
+logger = logging.getLogger(__name__)
 
 # Clova Speech: language code 매핑 (내부 ko -> API ko-KR 등)
 _CLOVA_LANG_MAP = {
@@ -20,13 +22,6 @@ _CLOVA_LANG_MAP = {
     "zh-cn": "zh-cn",
     "zh-tw": "zh-tw",
 }
-
-
-@lru_cache(maxsize=1)
-def get_openai_client() -> OpenAI:
-    """Get OpenAI client (cached)."""
-    settings = get_settings()
-    return OpenAI(api_key=settings.openai_api_key)
 
 
 def _transcribe_with_clova(
@@ -139,6 +134,12 @@ def _transcribe_with_donkey_url(file_url: str) -> list[dict]:
     api_host = settings.donkey_stt_api_host or ""
 
     headers = {"Host": api_host} if api_host else {}
+    logger.info(
+        "Donkey STT POST %s (Host=%s, client audio url length=%s)",
+        api_url,
+        api_host or "(default)",
+        len(file_url),
+    )
     with httpx.Client(timeout=600.0, headers=headers) as client:
         resp = client.post(api_url, json={"url": file_url})
     resp.raise_for_status()
@@ -156,6 +157,11 @@ def transcribe_with_url(file_url: str, language: str = "ko") -> list[dict]:
     api_host = settings.donkey_stt_api_host or ""
 
     headers = {"Host": api_host} if api_host else {}
+    logger.info(
+        "Donkey STT POST %s (temp, Host=%s)",
+        api_url,
+        api_host or "(default)",
+    )
     with httpx.Client(timeout=600.0, headers=headers) as client:
         resp = client.post(api_url, json={"url": file_url, "language": language})
         resp.raise_for_status()

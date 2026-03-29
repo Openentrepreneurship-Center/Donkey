@@ -1,0 +1,25 @@
+name: Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: sk-test-ci-placeholder-not-used-for-live-calls
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Sync deps
+        run: cd donkey && uv sync --group dev
+
+      - name: Run tests
+        run: cd donkey && uv run pytest tests/ -q --cov=app --cov-report=term-missing
