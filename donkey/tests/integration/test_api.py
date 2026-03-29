@@ -37,6 +37,7 @@ def memory_store():
 @pytest.fixture
 def app(memory_store, monkeypatch, clean_settings_cache):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("USE_ARQ_QUEUE", "false")
     with patch("app.db.is_db_configured", return_value=False), \
          patch("app.db.session.is_db_configured", return_value=False), \
          patch("app.store.redis.close_all_redis_clients", new_callable=AsyncMock), \

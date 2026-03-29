@@ -36,13 +36,26 @@ from app.db import init_db, is_db_configured
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    app.state.arq_pool = None
     app.state.job_semaphore = asyncio.Semaphore(settings.max_concurrent_jobs)
+    if settings.use_arq_queue:
+        from app.arq_worker import create_arq_pool
+
+        app.state.arq_pool = await create_arq_pool()
+    else:
+        app.state.arq_pool = None
     if is_db_configured():
         try:
             await init_db()
         except Exception as e:
             _app_logger.warning("DB init (create tables) skipped: %s", e)
     yield
+    pool = getattr(app.state, "arq_pool", None)
+    if pool is not None:
+        try:
+            await pool.aclose()
+        except Exception:
+            pass
     try:
         await close_all_redis_clients()
     except Exception:

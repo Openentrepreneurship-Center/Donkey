@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 @pytest.mark.asyncio
 async def test_health_ok(monkeypatch, clean_settings_cache):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("USE_ARQ_QUEUE", "false")
     from app.main import app
 
     transport = ASGITransport(app=app)

@@ -28,5 +28,6 @@ USER appuser
 
 EXPOSE 8000
 
-# Run with uvicorn
+# API
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 워커(같은 이미지, CMD만 교체): uv run arq app.arq_worker.WorkerSettings

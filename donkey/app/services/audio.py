@@ -6,12 +6,12 @@ from pathlib import Path
 import httpx
 from pydub import AudioSegment
 
-from app.config import get_settings
+from app.config import get_settings, httpx_verify
 
 
 async def download_audio(url: str, dest_path: Path) -> None:
     """Download audio file from URL."""
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    async with httpx.AsyncClient(timeout=300.0, verify=httpx_verify()) as client:
         response = await client.get(url, follow_redirects=True)
         response.raise_for_status()
         dest_path.write_bytes(response.content)

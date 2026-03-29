@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from pydub import AudioSegment
 
-from app.config import get_settings
+from app.config import get_settings, httpx_verify
 from app.services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def _transcribe_with_clova(
     files = {"media": (path.name, media_bytes, "audio/wav")}
     data = {"params": json.dumps(params), "type": "application/json"}
 
-    with httpx.Client(timeout=300.0) as client:
+    with httpx.Client(timeout=300.0, verify=httpx_verify()) as client:
         resp = client.post(url, headers=headers, files=files, data=data)
     resp.raise_for_status()
     body = resp.json()
@@ -140,7 +140,7 @@ def _transcribe_with_donkey_url(file_url: str) -> list[dict]:
         api_host or "(default)",
         len(file_url),
     )
-    with httpx.Client(timeout=600.0, headers=headers) as client:
+    with httpx.Client(timeout=600.0, headers=headers, verify=httpx_verify()) as client:
         resp = client.post(api_url, json={"url": file_url})
     resp.raise_for_status()
     return _segments_from_donkey_response(resp.json())
@@ -162,7 +162,7 @@ def transcribe_with_url(file_url: str, language: str = "ko") -> list[dict]:
         api_url,
         api_host or "(default)",
     )
-    with httpx.Client(timeout=600.0, headers=headers) as client:
+    with httpx.Client(timeout=600.0, headers=headers, verify=httpx_verify()) as client:
         resp = client.post(api_url, json={"url": file_url, "language": language})
         resp.raise_for_status()
         body = resp.json()

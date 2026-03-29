@@ -92,12 +92,15 @@ jobs:
               "docker network create donkey-net 2>/dev/null || true",
               "docker stop donkey-api 2>/dev/null || true",
               "docker rm donkey-api 2>/dev/null || true",
+              "docker stop donkey-worker 2>/dev/null || true",
+              "docker rm donkey-worker 2>/dev/null || true",
               "echo " + ($envfile | @sh) + " > /home/ec2-user/.env",
               (if ($dburl | length) > 0 then "echo DATABASE_URL=" + ($dburl | @sh) + " >> /home/ec2-user/.env" else empty end),
               (if ($s3bucket | length) > 0 then "echo S3_LOGS_BUCKET=" + ($s3bucket | @sh) + " >> /home/ec2-user/.env" else empty end),
               "if ! docker ps -a --format \"{{.Names}}\" | grep -qx donkey-redis; then docker run -d --name donkey-redis --restart unless-stopped --network donkey-net redis:7-alpine; elif ! docker ps | grep -q donkey-redis; then docker start donkey-redis; fi",
               "docker network connect donkey-net donkey-redis 2>/dev/null || true",
               "docker run -d --name donkey-api --restart unless-stopped --network donkey-net --link donkey-redis:redis --env-file /home/ec2-user/.env " + $ecr + "/donkey:latest",
+              "docker run -d --name donkey-worker --restart unless-stopped --network donkey-net --link donkey-redis:redis --env-file /home/ec2-user/.env " + $ecr + "/donkey:latest uv run arq app.arq_worker.WorkerSettings",
               "echo \"donkey.ai.kr {\" > /home/ec2-user/Caddyfile",
               "echo \"    reverse_proxy donkey-api:8000\" >> /home/ec2-user/Caddyfile",
               "echo \"}\" >> /home/ec2-user/Caddyfile",
@@ -106,7 +109,7 @@ jobs:
               "docker run -d --name caddy --restart unless-stopped --network donkey-net -p 80:80 -p 443:443 -v /home/ec2-user/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data caddy:alpine",
               "docker image prune -af",
               "sleep 5",
-              "docker ps | grep -q donkey-api && docker ps | grep -q caddy && echo Deployment successful! || (docker logs donkey-api 2>/dev/null; docker logs caddy 2>/dev/null; exit 1)"
+              "docker ps | grep -q donkey-api && docker ps | grep -q donkey-worker && docker ps | grep -q caddy && echo Deployment successful! || (docker logs donkey-api 2>/dev/null; docker logs donkey-worker 2>/dev/null; docker logs caddy 2>/dev/null; exit 1)"
             ]')
 
           # Send command via SSM

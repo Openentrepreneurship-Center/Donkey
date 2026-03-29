@@ -42,3 +42,15 @@ class TestSettings:
         monkeypatch.setenv("STT_BACKEND", "clova")
         s = Settings()
         assert s.stt_backend == "clova"
+
+    def test_arq_job_timeout_default_900(self, monkeypatch, clean_settings_cache):
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        monkeypatch.delenv("ARQ_JOB_TIMEOUT_SECONDS", raising=False)
+        s = Settings()
+        assert s.arq_job_timeout_seconds == 900
+
+    def test_arq_job_timeout_from_env(self, monkeypatch, clean_settings_cache):
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        monkeypatch.setenv("ARQ_JOB_TIMEOUT_SECONDS", "1200")
+        s = Settings()
+        assert s.arq_job_timeout_seconds == 1200

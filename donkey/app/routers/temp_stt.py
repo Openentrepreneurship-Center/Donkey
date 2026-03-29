@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from app.config import get_settings
 from app.schemas.request import AIRequest
 from app.schemas.response import AICreateResponse, AICreateBody
-from app.schemas.error import ERROR_404, ERROR_500, error_response
+from app.schemas.error import ERROR_404, ERROR_500, ERROR_503, error_response
 from app.store.redis import (
     get_job_store,
     get_idempotency_job_id,
@@ -60,6 +60,25 @@ async def _schedule_worker_with_limit(app, job_id: str, file_url: str) -> None:
         semaphore.release()
 
     task.add_done_callback(_release)
+
+
+async def _enqueue_or_schedule_temp_stt(
+    req: Request,
+    background_tasks: BackgroundTasks,
+    job_id: str,
+    file_url: str,
+) -> None:
+    settings = get_settings()
+    if settings.use_arq_queue:
+        from app.arq_worker import enqueue_temp_stt_job
+
+        pool = getattr(req.app.state, "arq_pool", None)
+        if pool is None:
+            logger.error("arq_pool missing; check API lifespan / USE_ARQ_QUEUE / deployment version")
+            raise HTTPException(status_code=503, detail=error_response(*ERROR_503))
+        await enqueue_temp_stt_job(pool, job_id, file_url)
+    else:
+        background_tasks.add_task(_schedule_worker_with_limit, req.app, job_id, file_url)
 
 
 router = APIRouter(prefix="/temp/stt", tags=["임시 STT"])
@@ -122,7 +141,7 @@ async def create_temp_stt_job(
         "consultationSummary": None,
     })
 
-    background_tasks.add_task(_schedule_worker_with_limit, req.app, job_id, file_url)
+    await _enqueue_or_schedule_temp_stt(req, background_tasks, job_id, file_url)
 
     return AICreateResponse(
         status="ok",

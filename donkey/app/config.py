@@ -82,6 +82,22 @@ class Settings(BaseSettings):
         validation_alias="MAX_CONCURRENT_JOBS",
     )
 
+    # True: ARQ 큐 + 별도 워커 권장. False: API 프로세스 내 BackgroundTasks(기존 방식)
+    use_arq_queue: bool = Field(
+        default=True,
+        validation_alias="USE_ARQ_QUEUE",
+    )
+
+    # ARQ 워커 job_timeout(초). 전사 파이프라인 상한에 맞출 것.
+    arq_job_timeout_seconds: int = Field(
+        default=900,
+        validation_alias="ARQ_JOB_TIMEOUT_SECONDS",
+    )
+
+    # 오디오 URL 등 아웃바운드 HTTPS(httpx). CERTIFICATE_VERIFY_FAILED 시 certifi 등 CA 번들 경로 지정 권장.
+    http_ssl_verify: bool = Field(default=True, validation_alias="HTTP_SSL_VERIFY")
+    http_ca_bundle_path: str = Field(default="", validation_alias="HTTP_CA_BUNDLE_PATH")
+
     # Slack 알림 (비우면 미발송)
     slack_webhook_url: str = Field(default="", validation_alias="SLACK_WEBHOOK_URL")
 
@@ -112,6 +128,15 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def httpx_verify() -> bool | str:
+    """httpx verify 인자: CA 번들 경로가 있으면 그 경로, 없으면 http_ssl_verify 불리언."""
+    s = get_settings()
+    bundle = (s.http_ca_bundle_path or "").strip()
+    if bundle:
+        return bundle
+    return s.http_ssl_verify
 
 
 def get_processing_timeout_seconds(audio_duration_seconds: float) -> int:
