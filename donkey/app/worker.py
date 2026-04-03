@@ -6,6 +6,7 @@ import traceback
 from pathlib import Path
 
 from app.config import get_settings, get_processing_timeout_seconds
+from app.schemas.response import ConsultationSummary
 from app.store.redis import get_job_store
 
 logger = logging.getLogger(__name__)
@@ -213,7 +214,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "duration": duration,
                     "title": "",
                     "simpleSummary": "",
-                    "consultationSummary": None,
+                    "consultationSummary": ConsultationSummary().model_dump(),
                 })
                 logger.complete("completed")
                 await _persist_consultation_if_configured(store, job_id, logger, stored_audio_url=s3_audio_url)
@@ -290,7 +291,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     "duration": duration,
                     "title": "",
                     "simpleSummary": "",
-                    "consultationSummary": None,
+                    "consultationSummary": ConsultationSummary().model_dump(),
                 })
                 logger.complete("completed")
                 await _persist_consultation_if_configured(store, job_id, logger, stored_audio_url=s3_audio_url)
@@ -298,6 +299,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 return
 
             diarized_text = "\n".join(diarized_lines)
+            validation_abuse_reason: str | None = None
 
             # 5. Validate as medical conversation
             current_stage = "validation"
@@ -311,27 +313,11 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 return
 
             if not is_valid:
+                validation_abuse_reason = abuse_reason or "진료 대화가 아님"
                 logger.set_quality(
                     is_abusing=True,
-                    abusing_reason=abuse_reason or "진료 대화가 아님",
+                    abusing_reason=validation_abuse_reason,
                 )
-                await store.update_job(job_id, {
-                    "status": "completed",
-                    "isGenerated": True,
-                    "isAbusing": True,
-                    "abusingReason": abuse_reason or "진료 대화가 아님",
-                    "isScreening": False,
-                    "screeningReason": "해당되는 내용 없음.",
-                    "screening": {"names": [], "phones": []},
-                    "duration": duration,
-                    "title": "",
-                    "simpleSummary": "",
-                    "consultationSummary": None,
-                })
-                logger.complete("completed")
-                await _persist_consultation_if_configured(store, job_id, logger, stored_audio_url=s3_audio_url)
-                await logger.save_to_s3()
-                return
 
             # 6. Filter PII
             current_stage = "pii_filter"
@@ -358,10 +344,12 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             # Parse SOAP into consultationSummary (S→symptomRecord, O→testResults, A→doctorNotes, P→prescriptionAndCare)
             consultation_summary = parse_soap_to_consultation_summary(soap_text, filtered_lines)
 
-            # Set final quality metrics
+            is_abusing_final = validation_abuse_reason is not None
+            abusing_reason_final = validation_abuse_reason or ""
+
             logger.set_quality(
-                is_abusing=False,
-                abusing_reason="",
+                is_abusing=is_abusing_final,
+                abusing_reason=abusing_reason_final,
                 speaker_count=len(unique_speakers),
                 segment_count=len(diarized_lines),
             )
@@ -370,8 +358,8 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             await store.update_job(job_id, {
                 "status": "completed",
                 "isGenerated": True,
-                "isAbusing": False,
-                "abusingReason": "",
+                "isAbusing": is_abusing_final,
+                "abusingReason": abusing_reason_final,
                 "isScreening": is_screening,
                 "screeningReason": screening_reason,
                 "screening": screening,

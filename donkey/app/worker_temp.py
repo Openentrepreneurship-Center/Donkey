@@ -11,6 +11,7 @@ import time
 import traceback
 
 from app.config import get_settings
+from app.schemas.response import ConsultationSummary
 from app.services.openai_client import get_openai_client
 from app.services.job_logger import JobLogger
 from app.services.pii_filter import filter_pii_with_screening
@@ -184,7 +185,7 @@ async def process_audio_job_temp(job_id: str, file_url: str) -> None:
                 "duration": duration,
                 "title": "",
                 "simpleSummary": "",
-                "consultationSummary": None,
+                "consultationSummary": ConsultationSummary().model_dump(),
             })
             logger_inst.complete("completed")
             await logger_inst.save_to_s3()
@@ -233,13 +234,29 @@ async def process_audio_job_temp(job_id: str, file_url: str) -> None:
                 "duration": duration,
                 "title": "",
                 "simpleSummary": "",
-                "consultationSummary": None,
+                "consultationSummary": ConsultationSummary().model_dump(),
             })
             logger_inst.complete("completed")
             await logger_inst.save_to_s3()
             return
 
         diarized_text = "\n".join(diarized_lines)
+        validation_abuse_reason: str | None = None
+
+        current_stage = "validation"
+        logger_inst.start_stage()
+        is_valid, abuse_reason = await asyncio.to_thread(
+            validate_medical_conversation,
+            diarized_text,
+            settings.chat_model,
+        )
+        logger_inst.end_stage("validation_time_ms")
+        if not is_valid:
+            validation_abuse_reason = abuse_reason or "진료 대화가 아님"
+            logger_inst.set_quality(
+                is_abusing=True,
+                abusing_reason=validation_abuse_reason,
+            )
 
         # 3. 개인정보 필터링
         current_stage = "pii_filter"
@@ -257,9 +274,12 @@ async def process_audio_job_temp(job_id: str, file_url: str) -> None:
         title = await asyncio.to_thread(_generate_title, filtered_text, settings.chat_model)
         logger_inst.end_stage("summarization_time_ms")
 
+        is_abusing_final = validation_abuse_reason is not None
+        abusing_reason_final = validation_abuse_reason or ""
+
         logger_inst.set_quality(
-            is_abusing=False,
-            abusing_reason="",
+            is_abusing=is_abusing_final,
+            abusing_reason=abusing_reason_final,
             speaker_count=len(unique_speakers),
             segment_count=len(diarized_lines),
         )
@@ -268,8 +288,8 @@ async def process_audio_job_temp(job_id: str, file_url: str) -> None:
         await store.update_job(job_id, {
             "status": "completed",
             "isGenerated": True,
-            "isAbusing": False,
-            "abusingReason": "",
+            "isAbusing": is_abusing_final,
+            "abusingReason": abusing_reason_final,
             "isScreening": is_screening,
             "screeningReason": screening_reason,
             "screening": screening,
