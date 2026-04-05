@@ -18,6 +18,7 @@ from app.services.pii_filter import filter_pii_with_screening
 from app.services.rule_based_diarization import map_clova_speakers_to_roles
 from app.services.slack import notify_slack
 from app.services.transcription import seconds_to_time_str, transcribe_with_url
+from app.services.validation import validate_medical_conversation
 from app.store.redis import get_job_store
 
 logger = logging.getLogger(__name__)
