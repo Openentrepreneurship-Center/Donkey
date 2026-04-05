@@ -78,38 +78,24 @@ jobs:
           DATABASE_URL: ${{ steps.get-ssm.outputs.database_url }}
           S3_LOGS_BUCKET: ${{ steps.get-ssm.outputs.s3_logs_bucket }}
         run: |
-          # Build commands JSON array using jq for proper escaping
+          # EC2에서 실행할 블루–그린 배포 스크립트 (API: 후보 기동 → 헬스 → Caddy reload → 승격)
+          DEPLOY_SCRIPT_B64=$(base64 -w0 scripts/ec2-deploy.sh)
           COMMANDS=$(jq -n \
+            --arg b64 "$DEPLOY_SCRIPT_B64" \
             --arg ecr "$ECR_REGISTRY" \
             --arg envfile "$ENV_FILE" \
             --arg dburl "$DATABASE_URL" \
             --arg s3bucket "$S3_LOGS_BUCKET" \
             '[
               "set -e",
-              "echo Starting deployment...",
-              "aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin " + $ecr,
-              "docker pull " + $ecr + "/donkey:latest",
-              "docker network create donkey-net 2>/dev/null || true",
-              "docker stop donkey-api 2>/dev/null || true",
-              "docker rm donkey-api 2>/dev/null || true",
-              "docker stop donkey-worker 2>/dev/null || true",
-              "docker rm donkey-worker 2>/dev/null || true",
+              "echo Starting deployment (blue-green API)...",
+              "echo " + ($b64 | @sh) + " | base64 -d > /tmp/donkey-deploy.sh",
+              "chmod +x /tmp/donkey-deploy.sh",
               "echo " + ($envfile | @sh) + " > /home/ec2-user/.env",
               (if ($dburl | length) > 0 then "echo DATABASE_URL=" + ($dburl | @sh) + " >> /home/ec2-user/.env" else empty end),
               (if ($s3bucket | length) > 0 then "echo S3_LOGS_BUCKET=" + ($s3bucket | @sh) + " >> /home/ec2-user/.env" else empty end),
-              "if ! docker ps -a --format \"{{.Names}}\" | grep -qx donkey-redis; then docker run -d --name donkey-redis --restart unless-stopped --network donkey-net redis:7-alpine; elif ! docker ps | grep -q donkey-redis; then docker start donkey-redis; fi",
-              "docker network connect donkey-net donkey-redis 2>/dev/null || true",
-              "docker run -d --name donkey-api --restart unless-stopped --network donkey-net --link donkey-redis:redis --env-file /home/ec2-user/.env " + $ecr + "/donkey:latest",
-              "docker run -d --name donkey-worker --restart unless-stopped --network donkey-net --link donkey-redis:redis --env-file /home/ec2-user/.env " + $ecr + "/donkey:latest uv run arq app.arq_worker.WorkerSettings",
-              "echo \"donkey.ai.kr {\" > /home/ec2-user/Caddyfile",
-              "echo \"    reverse_proxy donkey-api:8000\" >> /home/ec2-user/Caddyfile",
-              "echo \"}\" >> /home/ec2-user/Caddyfile",
-              "docker stop caddy 2>/dev/null || true",
-              "docker rm caddy 2>/dev/null || true",
-              "docker run -d --name caddy --restart unless-stopped --network donkey-net -p 80:80 -p 443:443 -v /home/ec2-user/Caddyfile:/etc/caddy/Caddyfile -v caddy_data:/data caddy:alpine",
-              "docker image prune -af",
-              "sleep 5",
-              "docker ps | grep -q donkey-api && docker ps | grep -q donkey-worker && docker ps | grep -q caddy && echo Deployment successful! || (docker logs donkey-api 2>/dev/null; docker logs donkey-worker 2>/dev/null; docker logs caddy 2>/dev/null; exit 1)"
+              "export ECR_REGISTRY=" + ($ecr | @sh),
+              "bash /tmp/donkey-deploy.sh"
             ]')
 
           # Send command via SSM
