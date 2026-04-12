@@ -173,8 +173,9 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             # 3. Whisper 1회 전사(구간 타임스탬프 포함)
             current_stage = "transcription"
             logger.start_stage()
+            eval_job_id: str | None = None
             try:
-                whisper_segments = transcribe_with_segments(
+                whisper_segments, eval_job_id = transcribe_with_segments(
                     file_url,
                     language=settings.default_language,
                     model=settings.whisper_segment_model,
@@ -343,6 +344,30 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
 
             # Parse SOAP into consultationSummary (S→symptomRecord, O→testResults, A→doctorNotes, P→prescriptionAndCare)
             consultation_summary = parse_soap_to_consultation_summary(soap_text, filtered_lines)
+
+            # 8-1. 요약 채점 → hippo PATCH (stt-api가 만든 레코드에 요약 지표 추가)
+            if eval_job_id and settings.enable_summary_evaluation:
+                try:
+                    from app.services.evaluation.summary_evaluator import evaluate_summary_result
+                    from app.services.evaluation.hippo_client import patch_summary_evaluation
+
+                    summarization_ms = getattr(logger.log.stages, "summarization_time_ms", 0)
+                    transcript_for_eval = " ".join(
+                        seg.content for seg in (consultation_summary.conversationContent or [])
+                        if seg.content
+                    ).strip()
+
+                    patch_payload = evaluate_summary_result(
+                        consultation_summary=consultation_summary.model_dump(),
+                        transcript_text=transcript_for_eval,
+                        audio_duration_sec=duration,
+                        summarization_time_ms=summarization_ms,
+                    )
+                    await patch_summary_evaluation(eval_job_id, patch_payload)
+                except Exception as eval_exc:
+                    logging.getLogger(__name__).warning(
+                        "요약 채점 실패 (파이프라인 계속): %s", eval_exc
+                    )
 
             is_abusing_final = validation_abuse_reason is not None
             abusing_reason_final = validation_abuse_reason or ""

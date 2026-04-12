@@ -123,11 +123,15 @@ def _segments_from_donkey_response(body: Any) -> list[dict]:
     return out
 
 
-def _transcribe_with_donkey_url(file_url: str) -> list[dict]:
+def _transcribe_with_donkey_url(file_url: str) -> tuple[list[dict], str | None]:
     """온프레미스 STT API: 입력으로 받은 오디오 URL을 그대로 JSON으로 전달.
 
     POST /transcribe/clova-note, body: {"url": "<클라이언트 file URL>"}
     IP 직접 호출 + Host 헤더로 iptime 국가 차단 우회.
+
+    Returns:
+        (segments, evaluation_job_id) 튜플.
+        evaluation_job_id는 stt-api가 응답 헤더 X-Evaluation-Job-Id로 전달한 값.
     """
     settings = get_settings()
     api_url = (settings.donkey_stt_api_url or "").rstrip("/") + "/transcribe/clova-note"
@@ -143,7 +147,8 @@ def _transcribe_with_donkey_url(file_url: str) -> list[dict]:
     with httpx.Client(timeout=600.0, headers=headers, verify=httpx_verify()) as client:
         resp = client.post(api_url, json={"url": file_url})
     resp.raise_for_status()
-    return _segments_from_donkey_response(resp.json())
+    eval_job_id = resp.headers.get("X-Evaluation-Job-Id")
+    return _segments_from_donkey_response(resp.json()), eval_job_id
 
 
 def transcribe_with_url(file_url: str, language: str = "ko") -> list[dict]:
@@ -174,12 +179,14 @@ def transcribe_with_segments(
     file_url: str,
     language: str = "ko",
     model: str = "whisper-1",
-) -> list[dict]:
+) -> tuple[list[dict], str | None]:
     """
     Donkey STT: 클라이언트가 제출한 오디오 URL을 그대로 전달해 전사.
     구간별 타임스탬프(시작/끝)와 텍스트를 반환.
     language/model은 호환용 인자(STT API는 현재 url만 사용).
-    Returns list of {"start": float, "end": float, "text": str}.
+
+    Returns:
+        (segments, evaluation_job_id) 튜플.
     """
     _ = language, model
     return _transcribe_with_donkey_url(file_url)

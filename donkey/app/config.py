@@ -101,6 +101,18 @@ class Settings(BaseSettings):
     # Slack 알림 (비우면 미발송)
     slack_webhook_url: str = Field(default="", validation_alias="SLACK_WEBHOOK_URL")
 
+    # ── 채점 저장 서비스 (hippo) 연동 ──
+    # 요약 채점 활성화 여부 (false면 요약 채점 + hippo PATCH 안 함)
+    enable_summary_evaluation: bool = Field(
+        default=True, validation_alias="ENABLE_SUMMARY_EVALUATION",
+    )
+    evaluation_storage_url: str = Field(
+        default="", validation_alias="EVALUATION_STORAGE_URL",
+    )
+    evaluation_storage_api_key: str = Field(
+        default="", validation_alias="EVALUATION_STORAGE_API_KEY",
+    )
+
     # CORS (쉼표 구분, 예: https://admin.donkey.ai.kr,http://localhost:3000)
     cors_origins: str = Field(
         default="https://admin.donkey.ai.kr,http://localhost:3000",
