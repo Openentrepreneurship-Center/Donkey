@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _medical_terms: list[str] = []
 _term_set: set[str] = set()
 
-_DICT_PATH = Path(__file__).resolve().parent.parent / "data" / "medical_dict.json"
+_DICT_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "medical_dict.json"
 
 
 def _load_dict() -> None:
