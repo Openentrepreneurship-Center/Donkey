@@ -308,6 +308,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             is_valid, abuse_reason = validate_medical_conversation(
                 diarized_text,
                 chat_model=settings.chat_model,
+                job_logger=logger,
             )
             logger.end_stage("validation_time_ms")
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
@@ -335,9 +336,9 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             # 7. Generate summaries
             current_stage = "summarization"
             logger.start_stage()
-            soap_text = generate_soap_summary(filtered_text, settings.chat_model)
-            title = generate_title(filtered_text, settings.chat_model)
-            simple_summary = generate_simple_summary(filtered_text, settings.chat_model)
+            soap_text = generate_soap_summary(filtered_text, settings.chat_model, logger)
+            title = generate_title(filtered_text, settings.chat_model, logger)
+            simple_summary = generate_simple_summary(filtered_text, settings.chat_model, logger)
             logger.end_stage("summarization_time_ms")
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return

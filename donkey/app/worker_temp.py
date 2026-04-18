@@ -26,7 +26,11 @@ logger = logging.getLogger(__name__)
 CLIENT_ERROR_MESSAGE = "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
 
 
-def _generate_title(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
+def _generate_title(
+    diarized_text: str,
+    chat_model: str = "gpt-4o-mini",
+    job_logger: JobLogger | None = None,
+) -> str:
     """대화 내용을 바탕으로 보편적인 제목을 생성합니다."""
     client = get_openai_client()
 
@@ -50,10 +54,22 @@ def _generate_title(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
         temperature=0.3,
         max_tokens=50,
     )
+    if job_logger:
+        usage = getattr(resp, "usage", None)
+        if usage:
+            job_logger.add_chat_tokens(
+                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
+            )
     return resp.choices[0].message.content.strip().strip('"\'')
 
 
-def _generate_free_summary(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
+def _generate_free_summary(
+    diarized_text: str,
+    chat_model: str = "gpt-4o-mini",
+    job_logger: JobLogger | None = None,
+) -> str:
     """temp용: 강의 내용을 구조화하여 요약합니다 (요청 프롬프트 적용)."""
     client = get_openai_client()
 
@@ -133,6 +149,14 @@ Actions (다음 할 것)
         ],
         temperature=0.2,
     )
+    if job_logger:
+        usage = getattr(resp, "usage", None)
+        if usage:
+            job_logger.add_chat_tokens(
+                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
+            )
     return resp.choices[0].message.content.strip()
 
 
@@ -250,6 +274,7 @@ async def process_audio_job_temp(job_id: str, file_url: str) -> None:
             validate_medical_conversation,
             diarized_text,
             settings.chat_model,
+            logger_inst,
         )
         logger_inst.end_stage("validation_time_ms")
         if not is_valid:
@@ -271,8 +296,8 @@ async def process_audio_job_temp(job_id: str, file_url: str) -> None:
         # 5. 자유 형식 요약 + 제목 생성
         current_stage = "summarization"
         logger_inst.start_stage()
-        free_summary = await asyncio.to_thread(_generate_free_summary, filtered_text, settings.chat_model)
-        title = await asyncio.to_thread(_generate_title, filtered_text, settings.chat_model)
+        free_summary = await asyncio.to_thread(_generate_free_summary, filtered_text, settings.chat_model, logger_inst)
+        title = await asyncio.to_thread(_generate_title, filtered_text, settings.chat_model, logger_inst)
         logger_inst.end_stage("summarization_time_ms")
 
         is_abusing_final = validation_abuse_reason is not None

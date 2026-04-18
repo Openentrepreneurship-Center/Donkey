@@ -2,10 +2,31 @@ import re
 
 from app.config import get_settings
 from app.schemas.response import ConsultationSummary, ConversationItem
+from app.services.job_logger import JobLogger
 from app.services.openai_client import get_openai_client
 
 
-def generate_soap_summary(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
+def _record_chat_usage(resp, job_logger: JobLogger | None) -> None:
+    if not job_logger:
+        return
+    usage = getattr(resp, "usage", None)
+    if not usage:
+        return
+    input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+    total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+    job_logger.add_chat_tokens(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+    )
+
+
+def generate_soap_summary(
+    diarized_text: str,
+    chat_model: str = "gpt-4o-mini",
+    job_logger: JobLogger | None = None,
+) -> str:
     """Generate SOAP summary from diarized transcript."""
     client = get_openai_client()
 
@@ -142,10 +163,15 @@ SOAP(Subjective, Objective, Assessment, Plan) 형식으로 요약해줘.
         ],
         temperature=0.2,
     )
+    _record_chat_usage(resp, job_logger)
     return resp.choices[0].message.content.strip()
 
 
-def generate_title(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
+def generate_title(
+    diarized_text: str,
+    chat_model: str = "gpt-4o-mini",
+    job_logger: JobLogger | None = None,
+) -> str:
     """Generate a concise title for the consultation."""
     client = get_openai_client()
 
@@ -170,10 +196,15 @@ def generate_title(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
         temperature=0.3,
         max_tokens=50,
     )
+    _record_chat_usage(resp, job_logger)
     return resp.choices[0].message.content.strip().strip('"\'')
 
 
-def generate_simple_summary(diarized_text: str, chat_model: str = "gpt-4o-mini") -> str:
+def generate_simple_summary(
+    diarized_text: str,
+    chat_model: str = "gpt-4o-mini",
+    job_logger: JobLogger | None = None,
+) -> str:
     """Generate a 1-2 sentence simple summary."""
     client = get_openai_client()
 
@@ -198,6 +229,7 @@ def generate_simple_summary(diarized_text: str, chat_model: str = "gpt-4o-mini")
         temperature=0.3,
         max_tokens=150,
     )
+    _record_chat_usage(resp, job_logger)
     return resp.choices[0].message.content.strip()
 
 

@@ -35,6 +35,8 @@ class QualityMetrics:
 class ModelUsage:
     stt_model: str = ""
     chat_model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
     total_tokens: int = 0
 
 
@@ -67,8 +69,8 @@ class JobLogger:
         self._start_time = time.time()
         self._stage_start: float | None = None
         settings = get_settings()
-        stt_backend = (settings.stt_backend or "").strip().lower()
-        self.log.model_usage.stt_model = "clova-speech" if stt_backend == "clova" else settings.stt_model
+        # 운영 로그 정책: STT 모델명은 고정 문자열로 기록.
+        self.log.model_usage.stt_model = "donkey-opensource"
         self.log.model_usage.chat_model = settings.chat_model
 
     def start_stage(self) -> None:
@@ -100,8 +102,22 @@ class JobLogger:
         self.log.quality.speaker_count = speaker_count
         self.log.quality.segment_count = segment_count
 
+    def add_chat_tokens(
+        self,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        total_tokens: int = 0,
+    ) -> None:
+        self.log.model_usage.input_tokens += max(0, input_tokens)
+        self.log.model_usage.output_tokens += max(0, output_tokens)
+        if total_tokens > 0:
+            self.log.model_usage.total_tokens += total_tokens
+        else:
+            self.log.model_usage.total_tokens += max(0, input_tokens) + max(0, output_tokens)
+
     def add_tokens(self, tokens: int) -> None:
-        self.log.model_usage.total_tokens += tokens
+        # Backward compatibility for legacy callers.
+        self.add_chat_tokens(total_tokens=tokens)
 
     def set_error(self, error_type: str, error_message: str, error_stage: str = "") -> None:
         self.log.error = {

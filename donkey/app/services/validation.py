@@ -1,9 +1,11 @@
 from app.services.openai_client import get_openai_client
+from app.services.job_logger import JobLogger
 
 
 def validate_medical_conversation(
     diarized_text: str,
     chat_model: str = "gpt-4o-mini",
+    job_logger: JobLogger | None = None,
 ) -> tuple[bool, str]:
     """
     Validate if the transcribed text is a legitimate medical conversation.
@@ -45,6 +47,14 @@ def validate_medical_conversation(
         temperature=0.1,
         max_tokens=100,
     )
+    if job_logger:
+        usage = getattr(resp, "usage", None)
+        if usage:
+            job_logger.add_chat_tokens(
+                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
+            )
 
     response_text = resp.choices[0].message.content.strip()
 
