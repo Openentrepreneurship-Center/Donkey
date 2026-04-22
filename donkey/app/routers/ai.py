@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 from app.config import get_settings
 from app.dependencies import verify_api_key
-from app.schemas.request import AIRequest
+from app.schemas.request import AIConsultationFileRequest, AIRequest
 from app.schemas.response import (
     AICreateResponse,
     AICreateBody,
@@ -30,7 +30,11 @@ from app.worker import process_audio_job
 
 def _run_worker_sync(job_id: str, file_url: str) -> None:
     """스레드에서 별도 이벤트 루프로 워커 실행 → 메인 루프가 조회 API 등 즉시 처리 가능."""
-    asyncio.run(process_audio_job(job_id, file_url))
+    asyncio.run(process_audio_job(job_id, file_url=file_url))
+
+
+def _run_worker_sync_file_id(job_id: str, file_id: str) -> None:
+    asyncio.run(process_audio_job(job_id, file_id=file_id))
 
 
 async def _schedule_worker_with_limit(app, job_id: str, file_url: str) -> None:
@@ -38,6 +42,17 @@ async def _schedule_worker_with_limit(app, job_id: str, file_url: str) -> None:
     semaphore: asyncio.Semaphore = app.state.job_semaphore
     await semaphore.acquire()
     task = asyncio.create_task(asyncio.to_thread(_run_worker_sync, job_id, file_url))
+
+    def _release(_: asyncio.Task) -> None:
+        semaphore.release()
+
+    task.add_done_callback(_release)
+
+
+async def _schedule_worker_with_limit_file_id(app, job_id: str, file_id: str) -> None:
+    semaphore: asyncio.Semaphore = app.state.job_semaphore
+    await semaphore.acquire()
+    task = asyncio.create_task(asyncio.to_thread(_run_worker_sync_file_id, job_id, file_id))
 
     def _release(_: asyncio.Task) -> None:
         semaphore.release()
@@ -62,6 +77,25 @@ async def _enqueue_or_schedule_ai_job(
         await enqueue_ai_job(pool, job_id, file_url)
     else:
         background_tasks.add_task(_schedule_worker_with_limit, req.app, job_id, file_url)
+
+
+async def _enqueue_or_schedule_ai_job_from_file_id(
+    req: Request,
+    background_tasks: BackgroundTasks,
+    job_id: str,
+    file_id: str,
+) -> None:
+    settings = get_settings()
+    if settings.use_arq_queue:
+        from app.arq_worker import enqueue_ai_job_from_file_id
+
+        pool = getattr(req.app.state, "arq_pool", None)
+        if pool is None:
+            logger.error("arq_pool missing; check API lifespan / USE_ARQ_QUEUE / deployment version")
+            raise HTTPException(status_code=503, detail=error_response(*ERROR_503))
+        await enqueue_ai_job_from_file_id(pool, job_id, file_id)
+    else:
+        background_tasks.add_task(_schedule_worker_with_limit_file_id, req.app, job_id, file_id)
 
 
 router = APIRouter(prefix="/ai", tags=["AI 처리"])
@@ -131,6 +165,84 @@ async def create_ai_job(
     })
 
     await _enqueue_or_schedule_ai_job(req, background_tasks, job_id, file_url)
+
+    return AICreateResponse(
+        status="ok",
+        statusCode=200,
+        body=AICreateBody(id=job_id),
+    )
+
+
+@router.post(
+    "/from-consultation-file",
+    response_model=AICreateResponse,
+    summary="AI 작업 생성 (상담 fileId)",
+    description=(
+        "히포 상담 오디오 조회 API로 오디오를 확보한 뒤 전사·요약합니다. "
+        "검증용으로 `/ai` URL 방식과 병행할 수 있습니다."
+    ),
+)
+async def create_ai_job_from_consultation_file(
+    req: Request,
+    request: AIConsultationFileRequest,
+    background_tasks: BackgroundTasks,
+    api_key_ctx: tuple[int, int] = Depends(verify_api_key),
+):
+    settings = get_settings()
+    if not (settings.hippo_consultation_api_base_url or "").strip() or not (
+        settings.hippo_consultation_api_key or ""
+    ).strip():
+        raise HTTPException(
+            status_code=503,
+            detail=error_response(
+                "COMMON_503_000",
+                "상담 오디오 조회 설정(HIPPO_CONSULTATION_API_BASE_URL, HIPPO_CONSULTATION_API_KEY)이 필요합니다.",
+            ),
+        )
+
+    file_id_str = str(request.file_id)
+    fingerprint = hashlib.sha256(file_id_str.encode()).hexdigest()
+    window = settings.idempotency_window_seconds
+
+    job_id = str(uuid.uuid4())
+    set_ok = await set_idempotency_mapping_nx(fingerprint, job_id, window)
+    if not set_ok:
+        existing_job_id = await get_idempotency_job_id(fingerprint)
+        if existing_job_id:
+            logger.info(
+                "Idempotency (fileId): duplicate within window, returning job_id=%s",
+                existing_job_id,
+            )
+            return AICreateResponse(
+                status="ok",
+                statusCode=200,
+                body=AICreateBody(id=existing_job_id),
+            )
+
+    store = await get_job_store()
+    client_id, project_id = api_key_ctx
+    file_url_placeholder = f"consultation:{file_id_str}"
+
+    await store.create_job(job_id, {
+        "id": job_id,
+        "status": "pending",
+        "client_id": client_id,
+        "project_id": project_id,
+        "file_url": file_url_placeholder,
+        "file_id": file_id_str,
+        "isGenerated": False,
+        "isAbusing": False,
+        "abusingReason": "",
+        "isScreening": False,
+        "screeningReason": "해당되는 내용 없음.",
+        "screening": {"names": [], "phones": []},
+        "title": "",
+        "duration": 0,
+        "simpleSummary": "",
+        "consultationSummary": None,
+    })
+
+    await _enqueue_or_schedule_ai_job_from_file_id(req, background_tasks, job_id, file_id_str)
 
     return AICreateResponse(
         status="ok",

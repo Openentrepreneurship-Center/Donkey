@@ -20,12 +20,30 @@ from app.worker_temp import process_audio_job_temp
 
 logger = logging.getLogger(__name__)
 
+
+def _configure_arq_process_logging() -> None:
+    """API(uvicorn)와 별도 프로세스인 ARQ 워커에서도 app.* INFO가 보이도록 설정."""
+    root = logging.getLogger()
+    if not root.handlers:
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(
+            logging.Formatter("%(levelname)s %(name)s: %(message)s"),
+        )
+        root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+
 AI_JOB_FN = "process_ai_job_task"
 TEMP_STT_JOB_FN = "process_temp_stt_job_task"
 
 
 async def process_ai_job_task(ctx: dict[str, Any], job_id: str, file_url: str) -> None:
-    await process_audio_job(job_id, file_url)
+    await process_audio_job(job_id, file_url=file_url)
+
+
+async def process_ai_job_from_file_id_task(ctx: dict[str, Any], job_id: str, file_id: str) -> None:
+    await process_audio_job(job_id, file_id=file_id)
 
 
 async def process_temp_stt_job_task(ctx: dict[str, Any], job_id: str, file_url: str) -> None:
@@ -33,6 +51,7 @@ async def process_temp_stt_job_task(ctx: dict[str, Any], job_id: str, file_url: 
 
 
 async def arq_on_startup(ctx: dict[str, Any]) -> None:
+    _configure_arq_process_logging()
     logger.info(
         "ARQ worker startup (max concurrent jobs=%s)",
         get_settings().max_concurrent_jobs,
@@ -57,6 +76,20 @@ async def enqueue_ai_job(pool: ArqRedis, job_id: str, file_url: str) -> None:
         logger.warning("ARQ enqueue skipped (duplicate job_id?): %s", job_id)
 
 
+AI_JOB_FROM_FILE_ID_FN = "process_ai_job_from_file_id_task"
+
+
+async def enqueue_ai_job_from_file_id(pool: ArqRedis, job_id: str, file_id: str) -> None:
+    job = await pool.enqueue_job(
+        AI_JOB_FROM_FILE_ID_FN,
+        job_id,
+        file_id,
+        _job_id=job_id,
+    )
+    if job is None:
+        logger.warning("ARQ enqueue skipped (duplicate job_id?): %s", job_id)
+
+
 async def enqueue_temp_stt_job(pool: ArqRedis, job_id: str, file_url: str) -> None:
     job = await pool.enqueue_job(TEMP_STT_JOB_FN, job_id, file_url, _job_id=job_id)
     if job is None:
@@ -67,7 +100,7 @@ _cfg = get_settings()
 
 
 class WorkerSettings:
-    functions = [process_ai_job_task, process_temp_stt_job_task]
+    functions = [process_ai_job_task, process_ai_job_from_file_id_task, process_temp_stt_job_task]
     on_startup = arq_on_startup
     on_shutdown = arq_on_shutdown
     redis_settings = RedisSettings.from_dsn(_cfg.redis_url)

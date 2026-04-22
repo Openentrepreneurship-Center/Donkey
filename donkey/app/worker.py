@@ -23,7 +23,15 @@ from app.services.rule_based_diarization import (
     diarize_from_whisper_segments,
     map_clova_speakers_to_roles,
 )
-from app.services.transcription import transcribe_with_segments, seconds_to_time_str
+from app.services.hippo_consultation_audio import (
+    fetch_consultation_audio,
+    suffix_for_audio_content_type,
+)
+from app.services.transcription import (
+    transcribe_with_segments,
+    transcribe_with_segments_from_file,
+    seconds_to_time_str,
+)
 from app.services.summarization import (
     generate_soap_summary,
     generate_title,
@@ -106,12 +114,19 @@ async def _check_timeout_and_abort(
     return True
 
 
-async def process_audio_job(job_id: str, file_url: str) -> None:
+async def process_audio_job(
+    job_id: str,
+    *,
+    file_url: str | None = None,
+    file_id: str | None = None,
+) -> None:
     """
     Process audio file and update job status in Redis.
 
+    ``file_url`` 또는 ``file_id`` 중 하나만 지정한다.
+
     Pipeline:
-    1. Download audio from URL
+    1. Download audio from URL (또는 상담 file_id로 히포 조회)
     2. Convert to WAV 16kHz mono
     3. Run speaker diarization
     4. Transcribe each segment
@@ -121,13 +136,28 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
     8. Update Redis with results
     9. Save job log to S3
     """
+    if (file_url is None) == (file_id is None):
+        raise ValueError("Specify exactly one of file_url or file_id")
+    if file_url is not None and not str(file_url).strip():
+        raise ValueError("file_url must be non-empty")
+    if file_id is not None and not str(file_id).strip():
+        raise ValueError("file_id must be non-empty")
+
     store = await get_job_store()
     settings = get_settings()
-    logger = JobLogger(job_id=job_id, file_url=file_url)
+    log_file_ref = str(file_url).strip() if file_url else f"consultation:{str(file_id).strip()}"
+    run_logger = logging.getLogger(__name__)
+    logger = JobLogger(job_id=job_id, file_url=log_file_ref)
     current_stage = ""
 
     try:
         start_time = time.time()
+        run_logger.info(
+            "AI pipeline start job_id=%s source=%s ref=%s",
+            job_id,
+            "file_url" if file_url is not None else "file_id",
+            log_file_ref,
+        )
         await store.update_job(job_id, {"status": "processing"})
 
         # DB 저장은 마지막 _persist_consultation_if_configured에서 한 번에 (없으면 생성 + 데이터 채움)
@@ -135,20 +165,48 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
 
-            # 1. Download audio
+            # 1. Download audio (URL) or fetch from Hippo (file_id)
             current_stage = "download"
             logger.start_stage()
-            url_path = file_url.split("?")[0]
-            ext = Path(url_path).suffix or ".wav"
-            audio_path = tmpdir_path / f"input{ext}"
-            await download_audio(file_url, audio_path)
+            stt_content_type = "application/octet-stream"
+            if file_url is not None:
+                fu = str(file_url).strip()
+                run_logger.info("Stage[download] start job_id=%s source=url", job_id)
+                url_path = fu.split("?")[0]
+                ext = Path(url_path).suffix or ".wav"
+                audio_path = tmpdir_path / f"input{ext}"
+                await download_audio(fu, audio_path)
+                run_logger.info(
+                    "Stage[download] done job_id=%s source=url path=%s bytes=%s",
+                    job_id,
+                    audio_path.name,
+                    audio_path.stat().st_size if audio_path.exists() else 0,
+                )
+            else:
+                fid = str(file_id).strip()
+                run_logger.info("Stage[download] start job_id=%s source=file_id id=%s", job_id, fid)
+                payload = await fetch_consultation_audio(fid)
+                stt_content_type = payload.content_type
+                ext = suffix_for_audio_content_type(payload.content_type)
+                audio_path = tmpdir_path / f"input{ext}"
+                audio_path.write_bytes(payload.raw_bytes)
+                run_logger.info(
+                    "Stage[download] done job_id=%s source=file_id id=%s path=%s bytes=%s content_type=%s",
+                    job_id,
+                    fid,
+                    audio_path.name,
+                    len(payload.raw_bytes),
+                    payload.content_type,
+                )
             logger.end_stage("download_time_ms")
 
             # 2. Convert to WAV
             current_stage = "conversion"
             logger.start_stage()
+            run_logger.info("Stage[conversion] start job_id=%s input=%s", job_id, audio_path.name)
             wav_path = ensure_wav_16k_mono(audio_path)
             logger.end_stage("conversion_time_ms")
+            run_logger.info("Stage[conversion] done job_id=%s output=%s", job_id, wav_path.name)
 
             # Get duration → 음성 길이 기준 임계시간 설정 (테스트 시 override 사용)
             duration = get_audio_duration(wav_path)
@@ -157,6 +215,12 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 timeout_sec = settings.processing_timeout_override_seconds
             else:
                 timeout_sec = get_processing_timeout_seconds(duration)
+            run_logger.info(
+                "Stage[conversion] metrics job_id=%s duration_sec=%.2f timeout_sec=%s",
+                job_id,
+                duration,
+                timeout_sec,
+            )
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return
 
@@ -174,15 +238,34 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             current_stage = "transcription"
             logger.start_stage()
             eval_job_id: str | None = None
+            run_logger.info("Stage[transcription] start job_id=%s", job_id)
             try:
-                whisper_segments, eval_job_id = transcribe_with_segments(
-                    file_url,
-                    language=settings.default_language,
-                    model=settings.whisper_segment_model,
-                )
+                if file_url is not None:
+                    whisper_segments, eval_job_id = await asyncio.to_thread(
+                        transcribe_with_segments,
+                        str(file_url).strip(),
+                        settings.default_language,
+                        settings.whisper_segment_model,
+                    )
+                else:
+                    whisper_segments, eval_job_id = await asyncio.to_thread(
+                        transcribe_with_segments_from_file,
+                        audio_path,
+                        content_type=stt_content_type,
+                        filename=audio_path.name,
+                        language=settings.default_language,
+                        model=settings.whisper_segment_model,
+                    )
             except Exception:
                 whisper_segments = []
+                eval_job_id = None
             logger.end_stage("transcription_time_ms")
+            run_logger.info(
+                "Stage[transcription] done job_id=%s segments=%s eval_job_id=%s",
+                job_id,
+                len(whisper_segments),
+                eval_job_id or "(none)",
+            )
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return
 
@@ -198,6 +281,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                     pass  # 저장 실패 시 파이프라인은 계속 진행
 
             if not whisper_segments:
+                run_logger.warning("Stage[transcription] empty result job_id=%s", job_id)
                 logger.set_quality(
                     is_abusing=True,
                     abusing_reason="음성이 감지되지 않았습니다",
@@ -227,6 +311,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             # - 기존 포맷(start/end/text): 기존 diarization 로직 유지
             current_stage = "diarization"
             logger.start_stage()
+            run_logger.info("Stage[diarization] start job_id=%s", job_id)
             use_role_labeled_segments = bool(whisper_segments and whisper_segments[0].get("role"))
             if use_role_labeled_segments:
                 role_segments = [
@@ -270,6 +355,13 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                         line = f"[{speaker}] {seconds_to_time_str(start)}–{seconds_to_time_str(end)}: {text}"
                         diarized_lines.append(line)
             logger.end_stage("diarization_time_ms")
+            run_logger.info(
+                "Stage[diarization] done job_id=%s speakers=%s lines=%s mode=%s",
+                job_id,
+                len(unique_speakers),
+                len(diarized_lines),
+                "role_labeled" if use_role_labeled_segments else "rule_based",
+            )
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return
 
@@ -277,6 +369,7 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             logger.set_quality(segment_count=len(diarized_lines))
 
             if not diarized_lines:
+                run_logger.warning("Stage[diarization] no usable lines job_id=%s", job_id)
                 logger.set_quality(
                     is_abusing=True,
                     abusing_reason="전사할 수 있는 음성이 없습니다",
@@ -305,12 +398,18 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             # 5. Validate as medical conversation
             current_stage = "validation"
             logger.start_stage()
+            run_logger.info("Stage[validation] start job_id=%s", job_id)
             is_valid, abuse_reason = validate_medical_conversation(
                 diarized_text,
                 chat_model=settings.chat_model,
                 job_logger=logger,
             )
             logger.end_stage("validation_time_ms")
+            run_logger.info(
+                "Stage[validation] done job_id=%s is_valid=%s",
+                job_id,
+                is_valid,
+            )
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return
 
@@ -324,22 +423,36 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
             # 6. Filter PII
             current_stage = "pii_filter"
             logger.start_stage()
+            run_logger.info("Stage[pii_filter] start job_id=%s", job_id)
             filtered_text, screening_data = filter_pii_with_screening(diarized_text)
             filtered_lines = [filter_pii(line) for line in diarized_lines]
             is_screening = bool(screening_data["names"] or screening_data["phones"])
             screening_reason = "해당되는 내용 발견." if is_screening else "해당되는 내용 없음."
             screening = {"names": screening_data["names"], "phones": screening_data["phones"]}
             logger.end_stage("pii_filter_time_ms")
+            run_logger.info(
+                "Stage[pii_filter] done job_id=%s names=%s phones=%s",
+                job_id,
+                len(screening_data["names"]),
+                len(screening_data["phones"]),
+            )
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return
 
             # 7. Generate summaries
             current_stage = "summarization"
             logger.start_stage()
+            run_logger.info("Stage[summarization] start job_id=%s", job_id)
             soap_text = generate_soap_summary(filtered_text, settings.chat_model, logger)
             title = generate_title(filtered_text, settings.chat_model, logger)
             simple_summary = generate_simple_summary(filtered_text, settings.chat_model, logger)
             logger.end_stage("summarization_time_ms")
+            run_logger.info(
+                "Stage[summarization] done job_id=%s title_len=%s simple_len=%s",
+                job_id,
+                len(title),
+                len(simple_summary),
+            )
             if await _check_timeout_and_abort(store, job_id, start_time, timeout_sec, logger):
                 return
 
@@ -395,10 +508,12 @@ async def process_audio_job(job_id: str, file_url: str) -> None:
                 "consultationSummary": consultation_summary.model_dump(),
             })
             logger.complete("completed")
+            run_logger.info("AI pipeline completed job_id=%s", job_id)
             await _persist_consultation_if_configured(store, job_id, logger, stored_audio_url=s3_audio_url)
 
     except Exception as e:
         traceback.print_exc()
+        run_logger.exception("AI pipeline failed job_id=%s stage=%s", job_id, current_stage)
 
         logger.set_error(
             error_type=type(e).__name__,

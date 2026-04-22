@@ -113,6 +113,16 @@ class Settings(BaseSettings):
         default="", validation_alias="EVALUATION_STORAGE_API_KEY",
     )
 
+    # 히포 상담 오디오 조회 (GET {base}/consultation/{fileId}/stt/audio-url, 헤더 x-api-key)
+    hippo_consultation_api_base_url: str = Field(
+        default="",
+        validation_alias="HIPPO_CONSULTATION_API_BASE_URL",
+    )
+    hippo_consultation_api_key: str = Field(
+        default="",
+        validation_alias="HIPPO_CONSULTATION_API_KEY",
+    )
+
     # CORS (쉼표 구분, 예: https://admin.donkey.ai.kr,http://localhost:3000)
     cors_origins: str = Field(
         default="https://admin.donkey.ai.kr,http://localhost:3000",

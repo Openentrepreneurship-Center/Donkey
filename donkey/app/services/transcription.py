@@ -1,4 +1,3 @@
-import json
 import logging
 import tempfile
 from pathlib import Path
@@ -11,79 +10,6 @@ from app.config import get_settings, httpx_verify
 from app.services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
-
-# Clova Speech: language code 매핑 (내부 ko -> API ko-KR 등)
-_CLOVA_LANG_MAP = {
-    "ko": "ko-KR",
-    "en": "en-US",
-    "enko": "enko",
-    "ja": "ja",
-    "zh": "zh-cn",
-    "zh-cn": "zh-cn",
-    "zh-tw": "zh-tw",
-}
-
-
-def _transcribe_with_clova(
-    wav_path: str | Path,
-    language: str = "ko",
-) -> list[dict]:
-    """
-    CLOVA Speech 장문 인식 API로 전사. 구간별 start/end(초), text 반환.
-    Returns list of {"start": float, "end": float, "text": str}.
-    """
-    settings = get_settings()
-    invoke_url = (settings.clova_speech_invoke_url or "").rstrip("/")
-    api_key = settings.clova_speech_api_key or ""
-    if not invoke_url or not api_key:
-        raise ValueError("CLOVA_SPEECH_INVOKE_URL and CLOVA_SPEECH_API_KEY must be set when STT_BACKEND=clova")
-
-    path = Path(wav_path)
-    clova_lang = _CLOVA_LANG_MAP.get(language, "ko-KR")
-    params = {
-        "language": clova_lang,
-        "completion": "sync",
-        "fullText": True,
-        "wordAlignment": True,
-        "diarization": {"enable": True},
-    }
-
-    url = f"{invoke_url}/recognizer/upload"
-    headers = {"X-CLOVASPEECH-API-KEY": api_key}
-    with path.open("rb") as f:
-        media_bytes = f.read()
-    files = {"media": (path.name, media_bytes, "audio/wav")}
-    data = {"params": json.dumps(params), "type": "application/json"}
-
-    with httpx.Client(timeout=300.0, verify=httpx_verify()) as client:
-        resp = client.post(url, headers=headers, files=files, data=data)
-    resp.raise_for_status()
-    body = resp.json()
-
-    if body.get("result") != "COMPLETED":
-        raise RuntimeError(f"CLOVA Speech failed: {body.get('message', body)}")
-
-    segments_raw = body.get("segments") or []
-    out: list[dict] = []
-    for seg in segments_raw:
-        start_ms = int(seg.get("start") or 0)
-        end_ms = int(seg.get("end") or 0)
-        text = (seg.get("text") or "").strip()
-        # Clova 화자 라벨 (diarization.label 또는 speaker.label, 문자열 "1","2" 등)
-        raw_label = seg.get("diarization") or seg.get("speaker") or {}
-        speaker = raw_label.get("label") if isinstance(raw_label, dict) else None
-        if speaker is not None:
-            speaker = str(speaker)
-        if text:
-            item: dict = {
-                "start": start_ms / 1000.0,
-                "end": end_ms / 1000.0,
-                "text": text,
-            }
-            if speaker is not None:
-                item["speaker"] = speaker
-            out.append(item)
-    return out
 
 
 def _segments_from_donkey_response(body: Any) -> list[dict]:
@@ -148,7 +74,13 @@ def _transcribe_with_donkey_url(file_url: str) -> tuple[list[dict], str | None]:
         resp = client.post(api_url, json={"url": file_url})
     resp.raise_for_status()
     eval_job_id = resp.headers.get("X-Evaluation-Job-Id")
-    return _segments_from_donkey_response(resp.json()), eval_job_id
+    segments = _segments_from_donkey_response(resp.json())
+    logger.info(
+        "Donkey STT URL transcription success segments=%s eval_job_id=%s",
+        len(segments),
+        eval_job_id or "(none)",
+    )
+    return segments, eval_job_id
 
 
 def transcribe_with_url(file_url: str, language: str = "ko") -> list[dict]:
@@ -171,8 +103,56 @@ def transcribe_with_url(file_url: str, language: str = "ko") -> list[dict]:
         resp = client.post(api_url, json={"url": file_url, "language": language})
         resp.raise_for_status()
         body = resp.json()
+    segments = _segments_from_donkey_response(body)
+    logger.info("Donkey STT temp transcription success segments=%s", len(segments))
+    return segments
 
-    return _segments_from_donkey_response(body)
+
+def transcribe_with_segments_from_file(
+    file_path: str | Path,
+    *,
+    content_type: str = "application/octet-stream",
+    filename: str | None = None,
+    language: str = "ko",
+    model: str = "whisper-1",
+) -> tuple[list[dict], str | None]:
+    """
+    Donkey STT: 로컬 오디오 파일을 multipart 필드 ``file``로 전송해 전사.
+
+    ``reference_text`` 파트는 보내지 않는다.
+    """
+    _ = language, model
+    path = Path(file_path)
+    settings = get_settings()
+    api_url = (settings.donkey_stt_api_url or "").rstrip("/") + "/transcribe/clova-note/file"
+    api_host = settings.donkey_stt_api_host or ""
+
+    headers = {"Host": api_host} if api_host else {}
+    fname = filename or path.name
+    ct = (content_type or "").strip() or "application/octet-stream"
+    file_body = path.read_bytes()
+    logger.info(
+        "Donkey STT POST %s (file, Host=%s, bytes=%s, filename=%s, content_type=%s)",
+        api_url,
+        api_host or "(default)",
+        len(file_body),
+        fname,
+        ct,
+    )
+    with httpx.Client(timeout=600.0, headers=headers, verify=httpx_verify()) as client:
+        resp = client.post(
+            api_url,
+            files={"file": (fname, file_body, ct)},
+        )
+    resp.raise_for_status()
+    eval_job_id = resp.headers.get("X-Evaluation-Job-Id")
+    segments = _segments_from_donkey_response(resp.json())
+    logger.info(
+        "Donkey STT file transcription success segments=%s eval_job_id=%s",
+        len(segments),
+        eval_job_id or "(none)",
+    )
+    return segments, eval_job_id
 
 
 def transcribe_with_segments(
