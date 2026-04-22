@@ -6,6 +6,14 @@ import traceback
 from pathlib import Path
 
 from app.config import get_settings, get_processing_timeout_seconds
+from app.schemas.error import (
+    ERROR_401_HIPPO_AUDIO_FORBIDDEN,
+    ERROR_404_INVALID_FILE_ID,
+    ERROR_429_HIPPO_AUDIO_RATE_LIMIT,
+    ERROR_500,
+    ERROR_503_HIPPO_AUDIO_UNAVAILABLE,
+    ERROR_524_TIMEOUT,
+)
 from app.schemas.response import ConsultationSummary
 from app.store.redis import get_job_store
 
@@ -24,6 +32,7 @@ from app.services.rule_based_diarization import (
     map_clova_speakers_to_roles,
 )
 from app.services.hippo_consultation_audio import (
+    HippoConsultationAudioError,
     fetch_consultation_audio,
     suffix_for_audio_content_type,
 )
@@ -48,6 +57,25 @@ TIMEOUT_ERROR_MESSAGE = "처리 시간이 제한을 초과했습니다. (오디�
 
 # 클라이언트에 노출할 공통 메시지 (세부 예외는 로그/DB에만)
 CLIENT_ERROR_MESSAGE = "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+
+
+def _map_pipeline_exception_to_error(e: Exception) -> tuple[int, str, str]:
+    """파이프라인 예외를 (http_status, error_code, client_message)로 매핑."""
+    if isinstance(e, HippoConsultationAudioError):
+        if e.status_code == 404:
+            code, message = ERROR_404_INVALID_FILE_ID
+            return 404, code, message
+        if e.status_code in (401, 403):
+            code, message = ERROR_401_HIPPO_AUDIO_FORBIDDEN
+            return 401, code, message
+        if e.status_code == 429:
+            code, message = ERROR_429_HIPPO_AUDIO_RATE_LIMIT
+            return 429, code, message
+        code, message = ERROR_503_HIPPO_AUDIO_UNAVAILABLE
+        return 503, code, message
+
+    code, _ = ERROR_500
+    return 500, code, CLIENT_ERROR_MESSAGE
 
 
 async def _persist_consultation_if_configured(
@@ -99,6 +127,8 @@ async def _check_timeout_and_abort(
     await store.update_job(job_id, {
         "status": "error",
         "error": TIMEOUT_ERROR_MESSAGE,
+        "error_code": ERROR_524_TIMEOUT[0],
+        "error_status": 500,
         "isGenerated": False,
         "isAbusing": False,
         "abusingReason": "",
@@ -514,6 +544,7 @@ async def process_audio_job(
     except Exception as e:
         traceback.print_exc()
         run_logger.exception("AI pipeline failed job_id=%s stage=%s", job_id, current_stage)
+        error_status, error_code, client_error_message = _map_pipeline_exception_to_error(e)
 
         logger.set_error(
             error_type=type(e).__name__,
@@ -524,7 +555,9 @@ async def process_audio_job(
 
         await store.update_job(job_id, {
             "status": "error",
-            "error": CLIENT_ERROR_MESSAGE,
+            "error": client_error_message,
+            "error_code": error_code,
+            "error_status": error_status,
             "isGenerated": False,
             "isAbusing": False,
             "abusingReason": "",

@@ -46,6 +46,24 @@ ERROR_524_INFERENCE = (
     "AI 추론 중 오류가 발생하였습니다. 나중에 다시 시도하세요.",
 )
 
+# 히포 상담 오디오 조회(fileId) 관련 세부 오류
+ERROR_404_INVALID_FILE_ID = (
+    "COMMON_404_100",
+    "유효하지 않은 fileId 이거나 해당 상담 오디오를 찾을 수 없습니다.",
+)
+ERROR_401_HIPPO_AUDIO_FORBIDDEN = (
+    "COMMON_401_100",
+    "상담 오디오 조회 권한이 없습니다. API 키/권한을 확인해 주세요.",
+)
+ERROR_429_HIPPO_AUDIO_RATE_LIMIT = (
+    "COMMON_429_100",
+    "상담 오디오 조회 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.",
+)
+ERROR_503_HIPPO_AUDIO_UNAVAILABLE = (
+    "COMMON_503_100",
+    "상담 오디오 조회 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+)
+
 
 def error_response(code: str, message: str) -> dict:
     """ErrorResponse 규격 dict 반환 (JSONResponse content용)."""

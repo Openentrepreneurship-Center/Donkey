@@ -302,11 +302,16 @@ async def get_ai_result(
         ).model_dump(exclude_none=True)
         return JSONResponse(content=payload, status_code=202)
     elif status == "error":
-        # 500: 규격 오류 형식 { code, message }, job에 저장된 error 메시지 사용
-        code, default_message = ERROR_500
+        # 오류 시: job에 저장된 세부 오류코드/상태 사용(없으면 500 기본값)
+        default_code, default_message = ERROR_500
+        code = str(job.get("error_code") or default_code)
+        try:
+            error_status = int(job.get("error_status") or 500)
+        except (TypeError, ValueError):
+            error_status = 500
         message = job.get("error") or default_message
         return JSONResponse(
-            status_code=500,
+            status_code=error_status,
             content=error_response(code, message),
         )
     else:  # completed
