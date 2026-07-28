@@ -163,10 +163,10 @@ def httpx_verify() -> bool | str:
 
 def get_processing_timeout_seconds(audio_duration_seconds: float) -> int:
     """입력 음성 길이(초)에 따른 처리 임계시간(초). 초과 시 오류 알람."""
-    if audio_duration_seconds <= 300:   # 5분 이하 → 1분 30초
-        return 90
-    if audio_duration_seconds <= 600:   # 10분 이하 → 2분
+    if audio_duration_seconds <= 300:   # 5분 이하 → 2분
         return 120
-    if audio_duration_seconds < 900:    # 10분 초과 ~ 15분 미만 → 3분
-        return 180
-    return 240  # 15분 이상 → 4분
+    if audio_duration_seconds <= 600:   # 10분 이하 → 2분 30초
+        return 150
+    if audio_duration_seconds < 900:    # 10분 초과 ~ 15분 미만 → 3분 30초
+        return 210
+    return 300  # 15분 이상 → 5분
