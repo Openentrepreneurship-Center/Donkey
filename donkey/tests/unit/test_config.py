@@ -12,21 +12,21 @@ def clean_env(monkeypatch, clean_settings_cache):
 
 
 class TestGetProcessingTimeout:
-    def test_short_audio_90s(self):
-        assert get_processing_timeout_seconds(60) == 90
-        assert get_processing_timeout_seconds(300) == 90
+    def test_short_audio_120s(self):
+        assert get_processing_timeout_seconds(60) == 120
+        assert get_processing_timeout_seconds(300) == 120
 
-    def test_medium_audio_120s(self):
-        assert get_processing_timeout_seconds(301) == 120
-        assert get_processing_timeout_seconds(600) == 120
+    def test_medium_audio_150s(self):
+        assert get_processing_timeout_seconds(301) == 150
+        assert get_processing_timeout_seconds(600) == 150
 
-    def test_long_audio_180s(self):
-        assert get_processing_timeout_seconds(601) == 180
-        assert get_processing_timeout_seconds(899) == 180
+    def test_long_audio_210s(self):
+        assert get_processing_timeout_seconds(601) == 210
+        assert get_processing_timeout_seconds(899) == 210
 
-    def test_very_long_audio_240s(self):
-        assert get_processing_timeout_seconds(900) == 240
-        assert get_processing_timeout_seconds(3600) == 240
+    def test_very_long_audio_300s(self):
+        assert get_processing_timeout_seconds(900) == 300
+        assert get_processing_timeout_seconds(3600) == 300
 
 
 class TestSettings:
